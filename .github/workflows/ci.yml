@@ -21,6 +21,12 @@ jobs:
         uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
+      - name: Configure git identity
+        # The `new`-command genesis tests shell out to `git commit`, which exits
+        # 128 on a runner with no configured identity.
+        run: |
+          git config --global user.email "ci@git-repo-agent.invalid"
+          git config --global user.name "git-repo-agent CI"
       - name: Lint (ruff)
         # Non-blocking for now: the code inherited from the monorepo is not yet
         # ruff-clean. Findings are surfaced here; a dedicated cleanup pass will
