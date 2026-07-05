@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: Lint (ruff)
+        # Non-blocking for now: the code inherited from the monorepo is not yet
+        # ruff-clean. Findings are surfaced here; a dedicated cleanup pass will
+        # flip this to a hard gate (tracked as a follow-up).
+        continue-on-error: true
+        run: |
+          uv run ruff check --output-format=github .
+          uv run ruff format --check .
+      - name: Test
+        run: uv run pytest -q
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+      - name: Build sdist + wheel
+        run: uv build
+      - name: Verify the built CLI runs standalone
+        run: |
+          uv run --isolated --no-project --with dist/*.whl git-repo-agent --help

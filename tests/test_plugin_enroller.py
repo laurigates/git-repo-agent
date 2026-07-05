@@ -253,9 +253,15 @@ class TestSkillMdDrift:
 
     @pytest.fixture(scope="class")
     def skill_rows(self) -> dict[str, set[str]]:
-        assert _SKILL_MD_PATH.is_file(), (
-            f"Expected SKILL.md at {_SKILL_MD_PATH}; monorepo layout changed?"
-        )
+        # This drift check compares the Python mapping against the upstream
+        # SKILL.md, which only exists in the claude-plugins monorepo checkout.
+        # A standalone install (uv tool install) has no sibling plugin sources,
+        # so skip rather than error — the monorepo copy still runs this test.
+        if not _SKILL_MD_PATH.is_file():
+            pytest.skip(
+                f"SKILL.md not present at {_SKILL_MD_PATH} (standalone install); "
+                "the stack→plugins drift check is monorepo-only"
+            )
         return _parse_skill_table(_SKILL_MD_PATH.read_text(encoding="utf-8"))
 
     def test_every_mapped_indicator_parses(self, skill_rows):
