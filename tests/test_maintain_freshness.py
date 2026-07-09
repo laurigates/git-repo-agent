@@ -78,7 +78,10 @@ def _make_remote_with_extra_commits(
     # Build the upstream working copy, then push to a bare remote.
     _init_repo(upstream)
     subprocess.run(
-        ["git", "init", "--bare", str(remote)],
+        # `-b main` explicitly: without it the bare remote's default branch
+        # follows the runner's init.defaultBranch (often `master`), leaving its
+        # HEAD dangling after `push origin main` and breaking the clone.
+        ["git", "init", "--bare", "-b", "main", str(remote)],
         check=True, capture_output=True,
     )
     subprocess.run(

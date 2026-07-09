@@ -1,26 +1,48 @@
 [project]
 name = "git-repo-agent"
 version = "1.0.0"
-description = "Claude Agent SDK app for repo creation, onboarding, and maintenance"
+description = "Claude Agent SDK CLI for repo creation, onboarding, and maintenance"
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [
     { name = "Lauri Gates", email = "lauri.gates@forumvirium.fi" }
 ]
 requires-python = ">=3.10"
+keywords = ["claude", "agent-sdk", "cli", "git", "repository", "automation", "blueprint"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Version Control :: Git",
+    "Topic :: Utilities",
+]
 dependencies = [
     "claude-agent-sdk>=0.1.39",
     "rich>=14.3.3",
     "typer>=0.24.0",
 ]
 
+[project.urls]
+Homepage = "https://github.com/laurigates/git-repo-agent"
+Repository = "https://github.com/laurigates/git-repo-agent"
+Issues = "https://github.com/laurigates/git-repo-agent/issues"
+
 [project.scripts]
 git-repo-agent = "git_repo_agent.main:app"
 
 [build-system]
-requires = ["uv_build>=0.10.2,<0.11.0"]
+requires = ["uv_build>=0.10.2,<0.12.0"]
 build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
     "pytest>=9.0.2",
+    "ruff>=0.9.0",
 ]

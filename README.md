@@ -14,12 +14,29 @@ git-repo-agent covers the full repository lifecycle:
 ## Installation
 
 ```bash
-# From this repo
-uv tool install -e ./git-repo-agent
+# Run without installing
+uvx git-repo-agent --help
+
+# Install as a global tool
+uv tool install git-repo-agent
 
 # Or with pipx
-pipx install ./git-repo-agent
+pipx install git-repo-agent
 ```
+
+From a source checkout:
+
+```bash
+uv tool install .
+```
+
+> This package was extracted from
+> [`laurigates/claude-plugins`](https://github.com/laurigates/claude-plugins)
+> (issue #1017). The subagent domain-knowledge prompts under
+> `src/git_repo_agent/prompts/generated/` are pre-compiled from that
+> marketplace's plugin skills and shipped in the wheel, so a standalone
+> install needs no `claude-plugins` checkout — see
+> [ADR-009](docs/adr/009-standalone-install-prompt-fallback.md).
 
 ## Usage
 
@@ -278,7 +295,7 @@ CLI surface (`git-repo-agent blueprint <subcommand>`):
 | `sync` | `blueprint-sync` | Detect stale generated content |
 | `scan` | `workspace-scan` → `feature-tracker-sync` → `feature-tracker-status` | Refresh monorepo rollups |
 | `adr-list` | `blueprint-adr-list` | List ADRs as markdown table |
-| `derive-plans` | `blueprint-derive-plans` | Derive PRDs/ADRs/PRPs from git (disabled for the claude-plugins repo itself — see [`CLAUDE.md`](../CLAUDE.md) "Blueprint constrained dogfooding") |
+| `derive-plans` | `blueprint-derive-plans` | Derive PRDs/ADRs/PRPs from git (disabled for the claude-plugins repo itself — see [claude-plugins `CLAUDE.md`](https://github.com/laurigates/claude-plugins/blob/main/CLAUDE.md) "Blueprint constrained dogfooding") |
 | `generate-rules` | `blueprint-generate-rules` | Auto-generate project rules |
 | `promote <target>` | `blueprint-promote` | Preserve custom edits |
 | `prp-create <feature>` | `blueprint-prp-create` | Create a PRP for a feature |
@@ -339,21 +356,53 @@ The `repo_analyze` tool detects:
 ## Development
 
 ```bash
-# Install in development mode
-uv sync --directory git-repo-agent
+# Install dev dependencies
+uv sync
 
 # Run CLI
-uv run --directory git-repo-agent git-repo-agent --help
+uv run git-repo-agent --help
+
+# Lint + test
+uv run ruff check .
+uv run pytest -q
 
 # Test with dry run
-uv run --directory git-repo-agent git-repo-agent onboard /tmp/test-repo --dry-run
+uv run git-repo-agent onboard /tmp/test-repo --dry-run
 
 # Quick health check (no API calls)
-uv run --directory git-repo-agent git-repo-agent health .
-
-# Pipeline diagnostics (dry run)
-uv run --directory git-repo-agent git-repo-agent diagnose . --dry-run
+uv run git-repo-agent health .
 ```
+
+### Keeping the compiled prompts in sync
+
+The pre-compiled subagent prompts under `src/git_repo_agent/prompts/generated/`
+are derived from the plugin skills in
+[`laurigates/claude-plugins`](https://github.com/laurigates/claude-plugins).
+That repo runs a workflow that regenerates these artifacts and opens a PR here
+whenever an upstream `SKILL.md` changes, so they stay current without a manual
+step. To regenerate locally from a sibling `claude-plugins` checkout:
+
+```bash
+uv run python scripts/compile_prompts.py        # regenerate
+uv run python scripts/compile_prompts.py --check # verify up to date (CI)
+```
+
+## Releasing
+
+Releases publish to [PyPI](https://pypi.org/project/git-repo-agent/) via
+[Trusted Publishing](https://docs.pypi.org/trusted-publishers/) (OIDC — no API
+token stored). `.github/workflows/publish.yml` runs on a published GitHub
+Release and builds + uploads the sdist and wheel.
+
+**One-time PyPI setup** (owner action, before the first release): add a
+*pending publisher* at
+<https://pypi.org/manage/account/publishing/> with
+project `git-repo-agent`, owner `laurigates`, repository `git-repo-agent`,
+workflow `publish.yml`, and environment `pypi`.
+
+To cut a release: bump `version` in `pyproject.toml`, tag, and create a GitHub
+Release for the tag. (Automating this with release-please is a planned
+follow-up once the release App credentials are provisioned for this repo.)
 
 ## Implementation Phases
 
