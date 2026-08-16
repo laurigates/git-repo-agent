@@ -1,0 +1,12 @@
+# Ruff configuration, mirroring laurigates/claude-plugins' repo-root ruff.toml
+# for the paths this repo inherited from that monorepo.
+#
+# Enforced by the "Lint (ruff)" step in .github/workflows/ci.yml. The dev
+# dependency group pins the same ruff version — keep the two in sync when
+# bumping.
+
+[lint.per-file-ignores]
+# The SDK transport monkeypatch must be installed before the modules that
+# construct a transport are imported, so these module-level imports are
+# intentionally below it (the patch import itself already carries `# noqa: E402`).
+"src/git_repo_agent/orchestrator.py" = ["E402"]
