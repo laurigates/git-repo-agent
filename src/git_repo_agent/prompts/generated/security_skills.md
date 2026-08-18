@@ -584,44 +584,23 @@ Verify latest versions before configuring:
 Use WebSearch or WebFetch to verify current versions.
 
 
-### Step 2: Detect project languages and tools
+### Step 2: Detect project languages and security posture
 
-Identify project languages and existing security tools:
+Run the detection script to scan the project for language signals and the
+three security layers (dependency auditing / SAST / secret detection) plus a
+SECURITY.md policy:
 
-| Indicator | Language/Tool | Security Tools |
-|-----------|---------------|----------------|
-| `package.json` | JavaScript/TypeScript | npm audit, Snyk |
-| `pyproject.toml` | Python | pip-audit, safety, bandit |
-| `Cargo.toml` | Rust | cargo-audit, cargo-deny |
-| `.gitleaks.toml` | gitleaks | Secret scanning |
-| `.github/workflows/` | GitHub Actions | CodeQL, Dependabot |
+```bash
+bash "${CLAUDE_SKILL_DIR}/scripts/configure-security.sh" --home-dir "$HOME" --project-dir "$(pwd)"
+```
 
-
-### Step 3: Analyze current security state
-
-Check existing security configuration across three areas:
-
-**Dependency Auditing:**
-- Package manager audit configured
-- Audit scripts in package.json/Makefile
-- Dependabot enabled
-- Dependency review action in CI
-- Auto-merge for minor updates configured
-
-**SAST Scanning:**
-- CodeQL workflow exists
-- Semgrep configured
-- Bandit configured (Python)
-- SAST in CI pipeline
-
-**Secret Detection:**
-- Gitleaks configured with `.gitleaks.toml`
-- Pre-commit hook configured
-- Git history scanned
-- TruffleHog configured (optional complement)
+Parse `STATUS=` and the `ISSUES:` block from the output. The `KEY=VALUE` lines
+report language detection (`LANG_JS`, `LANG_PYTHON`, `LANG_RUST`, `LANG_GO`) and
+the presence matrix (`DEPENDABOT`, `CODEQL`, `GITLEAKS_CONFIG`, `SECURITY_POLICY`,
+`TRUFFLEHOG`, `DEPENDENCY_REVIEW`, `SECURITY_LAYERS_PRESENT`).
 
 
-### Step 4: Generate compliance report
+### Step 3: Generate compliance report
 
 Print a formatted compliance report showing status for each security component across dependency auditing, SAST scanning, secret detection, and security policies.
 
@@ -630,7 +609,7 @@ If `--check-only` is set, stop here.
 For the compliance report format, see .
 
 
-### Step 5: Configure dependency auditing (if --fix or user confirms)
+### Step 4: Configure dependency auditing (if --fix or user confirms)
 
 Based on detected language:
 
@@ -650,7 +629,7 @@ Based on detected language:
 For complete configuration templates, see .
 
 
-### Step 6: Configure SAST scanning (if --fix or user confirms)
+### Step 5: Configure SAST scanning (if --fix or user confirms)
 
 1. Create CodeQL workflow `.github/workflows/codeql.yml` with detected languages
 2. For Python projects, install and configure Bandit
@@ -659,7 +638,7 @@ For complete configuration templates, see .
 For CodeQL workflow and Bandit configuration templates, see .
 
 
-### Step 7: Configure secret detection (if --fix or user confirms)
+### Step 6: Configure secret detection (if --fix or user confirms)
 
 1. Install gitleaks: `brew install gitleaks` (or `go install github.com/gitleaks/gitleaks/v8@latest`)
 2. Create `.gitleaks.toml` with project-specific allowlists
@@ -670,19 +649,14 @@ For CodeQL workflow and Bandit configuration templates, see .
 For gitleaks, TruffleHog, and CI workflow configuration templates, see .
 
 
-### Step 8: Create security policy
+### Step 7: Create security policy
 
-Create `SECURITY.md` with:
-- Supported versions table
-- Vulnerability reporting process (email, expected response time, disclosure policy)
-- Information to include in reports
-- Security best practices for users and contributors
-- Automated security tools list
-
-For the SECURITY.md template, see .
+Create `SECURITY.md` from the template (supported-versions table, vulnerability
+reporting process, report contents, best practices, automated-tools list) in
+.
 
 
-### Step 9: Configure CI/CD integration
+### Step 8: Configure CI/CD integration
 
 Create comprehensive security workflow `.github/workflows/security.yml` with jobs for:
 - Dependency audit
@@ -694,22 +668,13 @@ Schedule weekly scans in addition to push/PR triggers.
 For the CI security workflow template, see .
 
 
-### Step 10: Update standards tracking
+### Step 9: Update standards tracking
 
-Update `.project-standards.yaml`:
-
-```yaml
-components:
-  security: "2025.1"
-  security_dependency_audit: true
-  security_sast: true
-  security_secret_detection: true
-  security_policy: true
-  security_dependabot: true
-```
+Update `.project-standards.yaml` with the `security` component keys. For the
+exact block, see .
 
 
-### Step 11: Report configuration results
+### Step 10: Report configuration results
 
 Print a summary of all changes made across dependency auditing, SAST scanning, secret detection, security policy, and CI/CD integration. Include next steps for reviewing Dependabot PRs, CodeQL findings, and enabling private vulnerability reporting.
 
@@ -725,6 +690,22 @@ For the results report format, see .
 
 
 # configure-security Reference
+
+
+## Standards Tracking (`.project-standards.yaml`)
+
+Record the configured security components so `/configure:status` and
+`/configure:all` can track coverage:
+
+```yaml
+components:
+  security: "2025.1"
+  security_dependency_audit: true
+  security_sast: true
+  security_secret_detection: true
+  security_policy: true
+  security_dependabot: true
+```
 
 
 ## Compliance Report Format
@@ -840,10 +821,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Dependency Review
-        uses: actions/dependency-review-action@v4
+        uses: actions/dependency-review-action@v5
         with:
           fail-on-severity: moderate
           allow-licenses: MIT, Apache-2.0, BSD-3-Clause, ISC
@@ -911,19 +892,19 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@v3
+        uses: github/codeql-action/init@v4
         with:
           languages: ${{ matrix.language }}
           queries: +security-extended,security-and-quality
 
       - name: Autobuild
-        uses: github/codeql-action/autobuild@v3
+        uses: github/codeql-action/autobuild@v4
 
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@v3
+        uses: github/codeql-action/analyze@v4
         with:
           category: "/language:${{ matrix.language }}"
 ```
@@ -1020,7 +1001,7 @@ Add to `.pre-commit-config.yaml`:
 ```yaml
 repos:
   - repo: https://github.com/gitleaks/gitleaks
-    rev: v8.22.1
+    rev: v8.30.1
     hooks:
       - id: gitleaks
 ```
@@ -1042,7 +1023,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0  # Full history for scanning
 
@@ -1089,12 +1070,12 @@ jobs:
   scan:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
       - name: Gitleaks
-        uses: gitleaks/gitleaks-action@v2
+        uses: gitleaks/gitleaks-action@v3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 ```
@@ -1215,10 +1196,10 @@ jobs:
     name: Dependency Audit
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: '22'
 
@@ -1230,7 +1211,7 @@ jobs:
     name: Secret Scanning
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -1245,18 +1226,18 @@ jobs:
     name: SAST Scan
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@v3
+        uses: github/codeql-action/init@v4
         with:
           languages: javascript, python
 
       - name: Autobuild
-        uses: github/codeql-action/autobuild@v3
+        uses: github/codeql-action/autobuild@v4
 
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@v3
+        uses: github/codeql-action/analyze@v4
 ```
 
 
@@ -1472,6 +1453,26 @@ gh secret set ANTHROPIC_API_KEY
 
 ### Permission Scoping
 
+**Always include an explicit `permissions:` block.** Without one, the
+`GITHUB_TOKEN` inherits the repository's default scope. With one, anything
+unlisted is `none`. Set a read-only default at the top level and escalate only
+in the jobs that need write:
+
+```yaml
+permissions:
+  contents: read           # Top-level read-only default
+
+jobs:
+  fix:
+    permissions:
+      contents: write       # Escalate only where the job needs it
+      pull-requests: write
+```
+
+Also set the repository default `GITHUB_TOKEN` permission to read-only
+(Settings → Actions → General → Workflow permissions) so a workflow that forgets
+its block still starts from least privilege.
+
 **Minimal Permissions Example**:
 ```yaml
 permissions:
@@ -1532,6 +1533,31 @@ git log --format='%an <%ae>' HEAD^..HEAD
 ```
 
 
+### Script Injection (Untrusted Workflow Input)
+
+Distinct from *prompt* injection below. Any run-context value an external user
+controls — issue/PR titles and bodies, comment bodies, branch and base ref
+names, author and label names — is attacker-controlled. Interpolating it
+directly into a `run:` script via `${{ … }}` hands shell execution to anyone who
+can open a PR or comment.
+
+```yaml
+
+# WRONG — `a"; rm -rf / #` in the PR title runs as shell
+- run: echo "Reviewing: ${{ github.event.pull_request.title }}"
+
+
+# CORRECT — bind to an env var, reference the quoted shell variable (data, not code)
+- env:
+    PR_TITLE: ${{ github.event.pull_request.title }}
+  run: echo "Reviewing: $PR_TITLE"
+```
+
+For anything beyond a trivial echo, prefer a JavaScript action that receives the
+context value as an argument over building a shell string. See
+`.claude/rules/github-actions-security.md` for the full secure-use checklist.
+
+
 ### Prompt Injection Prevention
 
 **Sanitize External Content**:
@@ -1583,9 +1609,16 @@ if: |
 - Enable security scanning
 
 **External Contributors**:
+
+`pull_request_target` runs in the **base** repository context — it has access to
+secrets and a write-capable token even for a PR from a fork. The hazard: if the
+same job checks out and then **builds or executes** untrusted PR head code, that
+code can exfiltrate the secrets. Keep secrets away from any step that touches PR
+content, and never run untrusted build/test steps in a `pull_request_target` job.
+
 ```yaml
 
-# Use pull_request_target carefully
+# Use pull_request_target carefully — base-repo context has secrets
 on:
   pull_request_target:
     types: [opened]
@@ -1599,7 +1632,12 @@ jobs:
     permissions:
       contents: read  # Read-only for safety
       pull-requests: write
+    # Do NOT add untrusted build/test steps here, and do not expose secrets
+    # to steps that check out github.event.pull_request.head.sha.
 ```
+
+See `.claude/rules/github-actions-security.md` for the full `pull_request_target`
+guidance and the rest of the secure-use checklist.
 
 
 ## Security Checklist
@@ -1607,7 +1645,12 @@ jobs:
 
 ### Pre-Deployment
 - [ ] All credentials use GitHub secrets
-- [ ] Minimal permissions configured
+- [ ] Explicit `permissions:` block, read-only default + per-job escalation
+- [ ] Repo default `GITHUB_TOKEN` permission set to read-only
+- [ ] Untrusted run-context values pass through an `env:` var (no `${{ … }}` in `run:`)
+- [ ] Third-party actions SHA-pinned (Renovate-managed — see `version-pinning.md`)
+- [ ] `/.github/workflows/` listed in `.github/CODEOWNERS`
+- [ ] Actions blocked from creating/approving PRs unless a workflow needs it
 - [ ] Input validation implemented
 - [ ] Branch protection rules enabled
 - [ ] Security scanning enabled

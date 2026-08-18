@@ -40,7 +40,7 @@ If a migration step would require any prompt not listed above, **abort the upgra
      exit 1
    fi
    current=$(jq -r '.format_version // "1.0.0"' "$MANIFEST")
-   target="3.3.0"
+   target="3.4.0"
    ```
 
    **Important**: Store the resolved `$MANIFEST` path. Use it in every `jq` invocation throughout this skill and in all delegated migration steps. This avoids silent failures when the filename differs from what a command hard-codes.
@@ -54,7 +54,8 @@ If a migration step would require any prompt not listed above, **abort the upgra
    | 3.0.x        | 3.1.0      | `migrations/v3.0-to-v3.1.md` |
    | 3.1.x        | 3.2.0      | inline (step 3a) |
    | 3.2.x        | 3.3.0      | `migrations/v3.2-to-v3.3.md` |
-   | 3.3.0        | 3.3.0      | Already up to date |
+   | 3.3.x        | 3.4.0      | `migrations/v3.3-to-v3.4.md` |
+   | 3.4.0        | 3.4.0      | Already up to date |
 
 3. **Check for deprecated generated commands**:
 
@@ -126,7 +127,7 @@ If a migration step would require any prompt not listed above, **abort the upgra
       - `auto_run`: based on user choice (safe read-only tasks: `adr-validate`, `feature-tracker-sync`, `sync-ids`)
       - `last_completed_at: null`
       - `last_result: null`
-      - Default schedules: `derive-prd` → `on-demand`, `derive-plans` → `weekly`, `derive-rules` → `weekly`, `generate-rules` → `on-change`, `adr-validate` → `weekly`, `feature-tracker-sync` → `daily`, `sync-ids` → `on-change`, `claude-md` → `on-change`, `curate-docs` → `on-demand`
+      - Default schedules: `derive-plans` → `weekly`, `derive-rules` → `weekly`, `generate-rules` → `on-change`, `adr-validate` → `weekly`, `feature-tracker-sync` → `daily`, `sync-ids` → `on-change`, `claude-md` → `on-change`, `curate-docs` → `on-demand`
       - `stats: {}`
       - `context: {}`
 
@@ -146,12 +147,24 @@ If a migration step would require any prompt not listed above, **abort the upgra
 
    All changes are purely additive — standalone projects get no new top-level keys beyond `format_version` and `upgrade_history`.
 
+---
+
+3c. **v3.3 → v3.4 migration: Automation block (autonomy levels)**:
+
+   Delegate to `skills/blueprint-migration/migrations/v3.3-to-v3.4.md`. Summary of what it does:
+
+   a. Suggest an initial `autonomy_level` from existing `task_registry` state (any `auto_run: true` → suggest level 1; otherwise level 0). Confirm with the user; in `$NONINTERACTIVE` mode take the suggestion, never higher.
+   b. Add the `automation` block (`autonomy_level`, `interaction_mode: "normal"`, `work_orders: {auto_draft: false, auto_execute: false}`) to `$MANIFEST`.
+   c. Bump `format_version` to `3.4.0` and append an entry to `upgrade_history`.
+
+   Purely additive — a missing `automation` block already behaves as level 0, so the migration changes no behavior until the user raises the level. See ADR-0020 (claude-plugins) for the level model.
+
 4. **Display upgrade plan**:
    ```
    Blueprint Upgrade
 
    Current version: v{current}
-   Target version: v3.3.0
+   Target version: v3.4.0
 
    Major changes in v3.0:
    - Blueprint state moves from .claude/blueprints/ to docs/blueprint/
@@ -172,6 +185,12 @@ If a migration step would require any prompt not listed above, **abort the upgra
    - Cross-workspace references (`<path>/ADR-NNN`, `/ADR-NNN`)
    - Optional portfolio feature tracking via implemented_by links
 
+   Major changes in v3.4:
+   - `automation` block: autonomy_level (0 manual / 1 ambient bookkeeping /
+     2 quiet autopilot / 3 scheduled pipeline), interaction_mode, work_orders
+   - task_registry auto_run/schedule contract becomes executable
+     (scripts/blueprint-autorun.sh + SessionStart probe)
+
    (For v2.0 changes when upgrading from v1.x:)
    - PRDs, ADRs, PRPs move to docs/ (project documentation)
    - Custom overrides in .claude/skills/
@@ -184,7 +203,7 @@ If a migration step would require any prompt not listed above, **abort the upgra
 
    Otherwise, use report to orchestrator:
    ```
-   question: "Ready to upgrade blueprint from v{current} to v3.3.0?"
+   question: "Ready to upgrade blueprint from v{current} to v3.4.0?"
    options:
      - "Yes, upgrade now" → proceed
      - "Show detailed migration steps" → display migration document
@@ -199,6 +218,7 @@ If a migration step would require any prompt not listed above, **abort the upgra
    - For v3.0 → v3.1: Load `migrations/v3.0-to-v3.1.md`
    - For v3.1 → v3.2: Execute inline step 3a above
    - For v3.2 → v3.3: Load `migrations/v3.2-to-v3.3.md` (see step 3b summary)
+   - For v3.3 → v3.4: Load `migrations/v3.3-to-v3.4.md` (see step 3c summary)
    - Execute each step with user confirmation for destructive operations
 
 7. **v1.x → v2.0 migration overview** (from migration document):
@@ -362,93 +382,9 @@ If a migration step would require any prompt not listed above, **abort the upgra
       fi
       ```
 
-9. **Update manifest** (v3.0.0 schema):
-   ```json
-   {
-     "format_version": "3.0.0",
-     "created_at": "[preserved]",
-     "updated_at": "[now]",
-     "created_by": {
-       "blueprint_plugin": "3.0.0"
-     },
-     "project": {
-       "name": "[preserved]",
-       "type": "[preserved]",
-       "detected_stack": []
-     },
-     "structure": {
-       "has_prds": true,
-       "has_adrs": "[detected]",
-       "has_prps": "[detected]",
-       "has_work_orders": true,
-       "has_ai_docs": "[detected]",
-       "has_modular_rules": "[preserved]",
-       "has_document_detection": "[based on user choice]",
-       "claude_md_mode": "[preserved]"
-     },
-     "generated": {
-       "rules": {
-         "[rule-name]": {
-           "source": "docs/prds/...",
-           "source_hash": "sha256:...",
-           "generated_at": "[now]",
-           "plugin_version": "3.0.0",
-           "content_hash": "sha256:...",
-           "status": "current"
-         }
-       },
-       "commands": {}
-     },
-     "task_registry": {
-       "// note": "Added by v3.1 → v3.2 migration step above"
-     },
-     "custom_overrides": {
-       "rules": ["[any promoted rules]"],
-       "commands": []
-     },
-     "upgrade_history": [
-       {
-         "from": "{previous}",
-         "to": "3.0.0",
-         "date": "[now]",
-         "changes": ["Moved state to docs/blueprint/", "Converted skills to rules", "..."]
-       }
-     ]
-   }
-   ```
+9. **Update manifest** (v3.0.0 schema): write the manifest using the v3.0.0 schema template in . Preserve `created_at`, `project.name`, `project.type`, `structure.has_modular_rules`, and `structure.claude_md_mode` from the previous manifest. Set `updated_at` to now, `created_by.blueprint_plugin` to "3.0.0", and `generated.rules` from the migrated skills→rules conversion.
 
-10. **Report**:
-   ```
-   Blueprint upgraded successfully!
-
-   v{previous} → v3.0.0
-
-   State files moved to docs/blueprint/:
-   - .manifest.json
-   - feature-tracker.json
-   - work-orders/ directory
-   - ai_docs/ directory
-
-   Generated rules (.claude/rules/):
-   - {n} rules (converted from skills)
-
-   Custom layer (.claude/skills/):
-   - {n} promoted rules (preserved modifications)
-   - {n} promoted skills
-
-   [Document detection: enabled (if selected)]
-
-   Task registry:
-   - {n} tasks registered with scheduling metadata
-   - Auto-run mode: {user choice from migration step}
-   - Run /blueprint:status to see task health dashboard
-
-   New v3.0 architecture:
-   - Blueprint state: docs/blueprint/ (version-controlled with project)
-   - Generated rules: .claude/rules/ (project-specific context)
-   - Custom layer: Your overrides, never auto-modified
-   - Removed: .claude/blueprints/generated/ (no longer needed)
-   ```
+10. **Report**: print the upgrade report using the standard template in , substituting `{previous}` with the prior `format_version` and `{n}` placeholders with the actual counts.
 
 11. **Prompt for next action**:
 
@@ -493,3 +429,100 @@ If upgrade fails:
 - Use `git checkout -- .claude/` and `git checkout -- docs/blueprint/` to restore original structure
 - Manually move content back if needed
 - Report specific failure point for debugging
+
+
+# Blueprint Upgrade — Reference
+
+Reference templates for `/blueprint:upgrade`: the v3.0.0 manifest schema produced by step 9, and the standard upgrade report template emitted by step 10.
+
+
+## v3.0.0 Manifest Schema
+
+```json
+{
+  "format_version": "3.0.0",
+  "created_at": "[preserved]",
+  "updated_at": "[now]",
+  "created_by": {
+    "blueprint_plugin": "3.0.0"
+  },
+  "project": {
+    "name": "[preserved]",
+    "type": "[preserved]",
+    "detected_stack": []
+  },
+  "structure": {
+    "has_prds": true,
+    "has_adrs": "[detected]",
+    "has_prps": "[detected]",
+    "has_work_orders": true,
+    "has_ai_docs": "[detected]",
+    "has_modular_rules": "[preserved]",
+    "has_document_detection": "[based on user choice]",
+    "claude_md_mode": "[preserved]"
+  },
+  "generated": {
+    "rules": {
+      "[rule-name]": {
+        "source": "docs/prds/...",
+        "source_hash": "sha256:...",
+        "generated_at": "[now]",
+        "plugin_version": "3.0.0",
+        "content_hash": "sha256:...",
+        "status": "current"
+      }
+    },
+    "commands": {}
+  },
+  "task_registry": {
+    "// note": "Added by v3.1 → v3.2 migration step above"
+  },
+  "custom_overrides": {
+    "rules": ["[any promoted rules]"],
+    "commands": []
+  },
+  "upgrade_history": [
+    {
+      "from": "{previous}",
+      "to": "3.0.0",
+      "date": "[now]",
+      "changes": ["Moved state to docs/blueprint/", "Converted skills to rules", "..."]
+    }
+  ]
+}
+```
+
+
+## Step 10 Report Template
+
+```
+Blueprint upgraded successfully!
+
+v{previous} → v3.0.0
+
+State files moved to docs/blueprint/:
+- .manifest.json
+- feature-tracker.json
+- work-orders/ directory
+- ai_docs/ directory
+
+Generated rules (.claude/rules/):
+- {n} rules (converted from skills)
+
+Custom layer (.claude/skills/):
+- {n} promoted rules (preserved modifications)
+- {n} promoted skills
+
+[Document detection: enabled (if selected)]
+
+Task registry:
+- {n} tasks registered with scheduling metadata
+- Auto-run mode: {user choice from migration step}
+- Run /blueprint:status to see task health dashboard
+
+New v3.0 architecture:
+- Blueprint state: docs/blueprint/ (version-controlled with project)
+- Generated rules: .claude/rules/ (project-specific context)
+- Custom layer: Your overrides, never auto-modified
+- Removed: .claude/blueprints/generated/ (no longer needed)
+```

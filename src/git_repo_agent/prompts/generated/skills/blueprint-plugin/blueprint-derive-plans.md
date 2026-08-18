@@ -69,20 +69,24 @@ Collect findings in structured format for user confirmation.
 
 ### Step 6: Clarify project context with user
 
-Ask for clarifications on:
+Ask for clarifications via `report to orchestrator`. For the full question templates
+(problem statement, target users, project phase, stakeholder scale), see
+[REFERENCE.md](REFERENCE.md#clarifying-questions).
 
-1. **Project purpose** (if not clear from README): Present inferred description for confirmation or ask user to provide
-2. **Target users**: Who are the primary users (developers, end users, both)?
-3. **Feature confirmation**: Present {N} features extracted from git for review/prioritization
-4. **Architecture rationale**: For each identified decision, ask what was the main driver
-5. **Generation confirmation**: Show summary with metrics and ask if ready to generate
+1. **Project purpose** (if not clear from README): present the inferred description for confirmation, or report to the orchestrator to provide one
+2. **Target users**: developers, end users, or both — steers the PRD's framing
+3. **Project phase**: MVP / active development / maintenance / planning major changes — sets feature-vs-stability emphasis
+4. **Stakeholders**: scale (solo / small team / larger org / OSS community) → drives the depth of the PRD's stakeholder matrix (see [REFERENCE.md](REFERENCE.md#stakeholders--personas))
+5. **Feature confirmation**: present {N} features extracted from git for review/prioritization
+6. **Architecture rationale**: for each identified decision, ask the main driver
+7. **Generation confirmation**: show the summary below and ask if ready to generate
 
-For confirmation step, present:
+For the confirmation step, present:
 - Git history quality: {score}/10
 - Features identified: {N}
 - Architecture decisions: {N}
 - Future work items: {N}
-- Proposed documents: PRD, {N} ADRs, {N} PRPs
+- Proposed documents: PRD (with stakeholder matrix), {N} ADRs, {N} PRPs
 
 
 ### Step 7: Generate documents
@@ -100,6 +104,10 @@ For each document type, use templates and patterns from :
    - Use ADR template from REFERENCE.md
    - Include git evidence (commit SHA, date, files changed)
    - Mark with confidence score
+   - **Conflict & supersede check**: after writing the ADRs, run
+     `/blueprint:adr-relationships` to detect same-domain conflicts and
+     `/blueprint:adr-validate` to enforce bidirectional supersede consistency.
+     Do not re-implement conflict scoring here — those skills own it.
 
 3. **Create ADR index** at `docs/adrs/README.md`
    - Table of all ADRs with status and dates
@@ -114,6 +122,20 @@ For each document type, use templates and patterns from :
 ### Step 8: Update manifest and report results
 
 1. Update `docs/blueprint/manifest.json` with import metadata: timestamp, commits analyzed, confidence scores, generated artifacts
+
+
+### Step 8.5: Offer GitHub issues for generated docs (optional)
+
+For the generated PRD (and optionally each PRP), prompt with `report to orchestrator`
+whether to open a tracking GitHub issue. See
+[REFERENCE.md](REFERENCE.md#github-issue-tracking) for the prompt template and
+the `gh issue create` command. When the user accepts:
+
+1. Create the issue with title `[{PRD-NNN}] {Project Name}`.
+2. Add the issue number to the doc's `github-issues` frontmatter.
+3. Record it in the manifest `id_registry` (`documents[ID].github_issues` and the `github_issues` map).
+
+Skip silently when no `gh` remote is configured or the user declines.
 
 
 ### Step 9: Update task registry
@@ -273,6 +295,18 @@ git log --oneline {tag1}..{tag2} | head -10
 ## Stakeholders & Personas
 
 {From user input or marked as "Needs clarification"}
+
+
+### Stakeholder Matrix
+
+Depth scales with the stakeholder answer from Step 6 (solo → simplified;
+larger org / OSS → full matrix):
+
+| Role | Name / Team | Responsibility | Contact |
+|------|-------------|----------------|---------|
+| {Owner} | {name/team} | {what they decide} | {channel} |
+| {Maintainer} | {name/team} | {what they own} | {channel} |
+| {Consumer} | {name/team} | {how they use it} | {channel} |
 
 
 ### User Personas
@@ -654,3 +688,92 @@ options:
 - **Review low-confidence sections**: Focus review effort on sections marked < 7/10
 - **Iterative refinement**: Run import once, then refine documents manually
 - **Combine with existing docs**: If some documentation exists, import will incorporate it
+
+
+## Clarifying Questions
+
+Step 6 uses `report to orchestrator`. Templates (confirm the inferred option or pick
+an explicit one):
+
+**Problem statement**
+```
+question: "What is the primary problem this project solves?"
+options:
+  - "[Inferred from docs]: {description}"  → confirm inference
+  - "Let me describe it"                    → free-text input
+```
+
+**Target users**
+```
+question: "Who are the target users?"
+options:
+  - "Developers"                  → technical-documentation focus
+  - "End users"                   → user-experience focus
+  - "Both developers and end users" → balanced framing
+  - "Other"                       → custom description
+```
+
+**Project phase**
+```
+question: "What is the current project phase?"
+options:
+  - "Early development / MVP"   → focus on core features
+  - "Active development"        → feature expansion
+  - "Maintenance mode"          → stability and bug fixes
+  - "Planning major changes"    → architectural considerations
+```
+
+**Stakeholder scale** (drives the depth of the stakeholder matrix)
+```
+question: "Who are the key stakeholders for this project?"
+options:
+  - "Solo project (just me)"    → simplified RACI
+  - "Small team (2-5 people)"   → team collaboration
+  - "Larger organization"       → formal stakeholder matrix
+  - "Open source community"     → contributor-focused
+```
+
+
+## GitHub Issue Tracking
+
+Step 8.5 optionally opens a tracking issue per generated PRD (and, if the user
+wants, per PRP).
+
+```
+question: "Create a GitHub issue to track this PRD?"
+options:
+  - label: "Yes, create issue (Recommended)"
+    description: "Creates issue titled '[PRD-NNN] {Project Name}'"
+  - label: "No, skip for now"
+    description: "Can link later by editing github-issues in frontmatter"
+```
+
+If yes:
+
+```bash
+gh issue create \
+  --title "[{PRD-NNN}] {Project Name}" \
+  --body "## Product Requirements Document
+
+**Document**: \`docs/prds/{filename}.md\`
+**ID**: {PRD-NNN}
+
+
+### Summary
+{Executive summary from PRD}
+
+
+### Key Features
+{List of FR-* features}
+
+*Auto-generated from PRD. See linked document for full requirements.*" \
+  --label "prd,requirements"
+```
+
+Then capture the issue number and update:
+
+1. PRD frontmatter: add the number to `github-issues`.
+2. Manifest: add it to `id_registry.documents[PRD-NNN].github_issues`.
+3. Manifest: add the mapping to `id_registry.github_issues`.
+
+Skip silently when `gh` has no configured remote.

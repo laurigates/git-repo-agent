@@ -42,6 +42,83 @@ For each ADR, validate:
 See [REFERENCE.md](REFERENCE.md#validation-rules) for detailed checks.
 
 
+### Step 2b: Detect ADR-number collisions and index drift
+
+ADR numbers are chosen at branch time but only claimed at merge time, so two
+in-flight ADR PRs can pick the same number and both land (issue #1585 — the FVH
+infrastructure #2015 collision where two ADRs both claimed `0038`). Run the
+deterministic guard:
+
+```bash
+bash ${CLAUDE_SKILL_DIR}/scripts/check-adr-numbers.sh --project-dir "$(pwd)"
+```
+
+It emits the structured `STATUS=` / `ISSUE_COUNT=` convention and reports four
+classes (see [REFERENCE.md](REFERENCE.md#validation-rules)):
+
+- `duplicate_adr_number` (ERROR) — two files claim the same number, by `NNNN-title.md` **filename** or by a frontmatter `id: ADR-NNNN` claim. The message names the source (`basename` / `frontmatter`), so a claim from a file with no number in its name is legible.
+- `adr_number_collision` (ERROR) — a working-tree ADR claims a number a **different** file already holds on the base ref (`origin/main`) — the pre-merge parallel-PR case, caught before the second PR merges.
+- `adr_registry_mismatch` (ERROR) — a file claims `ADR-NNNN` but the manifest `id_registry` maps that number to a different path. The registry is the only arbiter resolving id → path unambiguously: two files can both *say* `ADR-0016`, only one can be registered. Silent with no manifest / no `id_registry`.
+- `adr_missing_index_row` (WARN) — an ADR is missing from the directory's README index (how the `0038` collision went unnoticed for a week). Repair via Step 2c instead of re-warning.
+
+**Multiple ADR directories** (issue #2129): the guard scans a directory *set* —
+the real ADR-0016 collision had its claimants in `docs/adrs/` and
+`docs/blueprint/adrs/`, which a single-directory scan cannot see. Precedence:
+repeatable `--adr-dir <dir>`, else `validation.adr_dirs` from the **shared**
+`validation` manifest block (issue #2128, read via
+`blueprint-plugin/scripts/get-validation-config.sh` — do not add a second config
+mechanism), else the default `docs/adrs` then `docs/adr` order. It emits
+`ADR_DIRS=` (TAB-separated) and `ADR_DIR_COUNT=`; `ADR_DIR=`, `ADR_COUNT=` and
+`INDEX=` keep their #1585 meanings.
+
+Fold findings into the Step 4 report. `STATUS=ERROR` is a blocking collision:
+renumber the newer ADR to the next free number (updating **both** its filename
+and its frontmatter `id:`), then regenerate the index (Step 2c).
+
+
+### Step 2c: Regenerate the ADR index
+
+`adr_missing_index_row` is repairable — the hand-maintained table is what
+rotted. Rebuild it from frontmatter:
+
+```bash
+
+# CI / read-only gate: non-zero exit when the on-disk index is out of date
+bash ${CLAUDE_SKILL_DIR}/scripts/generate-adr-index.sh --project-dir "$(pwd)" --check
+
+
+# Repair: rewrite the table in every resolved ADR directory
+bash ${CLAUDE_SKILL_DIR}/scripts/generate-adr-index.sh --project-dir "$(pwd)"
+```
+
+Only the block between two marker comments is rewritten, so prose around it
+survives:
+
+```markdown
+<!-- ADR-INDEX:START -->
+| ADR | Title | Status |
+| --- | ----- | ------ |
+| [ADR-0016](0016-in-engine-ui.md) | In-engine UI | Accepted |
+<!-- ADR-INDEX:END -->
+```
+
+One index per directory (`--index-file` overrides the `README.md` default), over
+the same directory set and widened number collection as Step 2b — so an ADR
+numbered only in frontmatter still gets a row. `--check` states per directory:
+
+| State | Severity | Meaning |
+|-------|----------|---------|
+| `in_sync` | OK | On-disk block matches the generated one |
+| `drifted` | ERROR (exit 1) | Regenerate — the index is stale |
+| `markers_absent` | WARN (exit 0) | No marker pair yet; a write adopts them. Deliberately **not** a diff |
+| `index_absent` | WARN (exit 0) | No index file yet; a write creates one |
+| `no_adrs` | OK | Directory holds no numbered ADRs |
+
+Write mode reports `written` / `unchanged` / `markers_inserted` /
+`index_created`. When markers land in a README that already had a hand-written
+table, delete that table — the generated block is authoritative.
+
+
 ### Step 3: Analyze domains
 
 1. Group ADRs by domain field
@@ -135,6 +212,32 @@ Report all changes made:
 - Inconsistent supersession: Supersedes but target not marked Superseded
 
 
+### ADR-Number Collisions (issue #1585)
+
+`scripts/check-adr-numbers.sh` guards the parallel-PR numbering race. ADR
+numbers are chosen at branch time but claimed at merge time, so two in-flight
+ADR PRs can pick the same number and both land (the FVH infrastructure #2015
+collision: two ADRs both numbered `0038`). The check is deterministic and
+emits the `=== ADR NUMBER AUDIT ===` / `STATUS=` / `ISSUE_COUNT=` convention.
+
+| Type | Severity | Meaning |
+|------|----------|---------|
+| `duplicate_adr_number` | ERROR | Two files in the working tree lead with the same `NNNN-`. |
+| `adr_number_collision` | ERROR | A working-tree ADR's number is already held by a **different** filename on the base ref (`origin/main`) — the pre-merge parallel-PR case. |
+| `adr_missing_index_row` | WARN | An ADR file is not referenced from the ADR directory's `README.md` index. |
+
+It resolves the ADR directory as `docs/adrs/` (blueprint canonical) or
+`docs/adr/`, degrades to `STATUS=OK` when neither exists, and skips the base-ref
+comparison (still checking duplicates + index) when `origin/main` is
+unavailable. Flags:
+
+- `--project-dir <path>` — repo root (default: cwd).
+- `--base-ref <ref>` — collision comparison ref (default: `origin/main`).
+
+Remediation for an ERROR: renumber the newer ADR to the next free sequential
+number, rewrite its `# ADR-NNNN:` title, and backfill the README index row.
+
+
 ## Report Format
 
 ```
@@ -204,4 +307,4 @@ adr_supersedes=$(head -50 "$file" | grep -m1 "^supersedes:" | sed 's/^[^:]*:[[:s
 - Run after creating new ADRs
 - Domain conflicts indicate decisions needing reconciliation
 - Untagged ADRs are valid but harder to analyze
-- Use `/blueprint:derive-adr` to create ADRs with proper relationships
+- Use `/blueprint:derive-plans` to create ADRs with proper relationships

@@ -22,6 +22,22 @@ Display feature tracker statistics, phase progress, and completion summary.
    - Count features per phase
    - Count PRDs by status
 
+3a. **Confirm the statistics cache is trustworthy** (read-only):
+
+   Everything this skill displays is quoted from `statistics`, which is a
+   **cache** of the features collection — so verify it before quoting it:
+
+   ```bash
+   bash "${CLAUDE_SKILL_DIR}/../../scripts/blueprint-tracker-check.sh" --project-dir "$(pwd)"
+   ```
+
+   On `STATUS=ERROR` with `TYPE=statistics_divergence` rows, display the
+   recomputed `EXPECTED=` figures (not the cached ones) and add a line to the
+   report: `Statistics cache is stale — run /blueprint:feature-tracker-sync`.
+   Surface any other `ISSUES:` rows verbatim under a "Tracker Integrity"
+   heading. This skill never writes, so it reports and defers the fix to
+   `/blueprint:feature-tracker-sync` (its Step 7a).
+
 4. **Display status report**:
    ```
    Feature Tracker Status

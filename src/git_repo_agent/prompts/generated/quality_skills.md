@@ -145,514 +145,129 @@ For fast reviews, at minimum check:
 
 ---
 
-## code-antipatterns-analysis
-
-# Code Anti-patterns Analysis
-
-
-## Analysis Philosophy
-
-This skill emphasizes **parallel delegation** for comprehensive analysis. Rather than sequentially scanning for issues, launch multiple specialized agents to examine different categories simultaneously, then consolidate findings.
-
-
-## Analysis Categories
-
-
-### 1. JavaScript/TypeScript Anti-patterns
-
-**Callback Hell & Async Issues**
-```bash
-
-# Nested callbacks (3+ levels)
-ast-grep -p '$FUNC($$$, function($$$) { $FUNC2($$$, function($$$) { $$$ }) })' --lang js
-
-
-# Missing error handling in async
-ast-grep -p 'async function $NAME($$$) { $$$ }' --lang js
-
-# Then check if try-catch is present
-
-
-# Unhandled promise rejection
-ast-grep -p '$PROMISE.then($$$)' --lang js
-
-# Without .catch() - use composite rule
-```
-
-**Magic Values**
-```bash
-
-# Magic numbers in comparisons
-ast-grep -p 'if ($VAR > 100)' --lang js
-ast-grep -p 'if ($VAR < 50)' --lang js
-ast-grep -p 'if ($VAR === 42)' --lang js
-
-
-# Magic strings
-ast-grep -p "if ($VAR === 'admin')" --lang js
-```
-
-**Empty Catch Blocks**
-```bash
-ast-grep -p 'try { $$$ } catch ($E) { }' --lang js
-```
-
-**Console Statements (Debug Leftovers)**
-```bash
-ast-grep -p 'console.log($$$)' --lang js
-ast-grep -p 'console.debug($$$)' --lang js
-ast-grep -p 'console.warn($$$)' --lang js
-```
-
-**Use let/const for Variable Declarations**
-```bash
-ast-grep -p 'var $VAR = $$$' --lang js
-```
-
-
-### 2. Vue 3 Anti-patterns
-
-**Props Mutation**
-```yaml
-
-# YAML rule for props mutation detection
-id: vue-props-mutation
-language: JavaScript
-message: Use computed properties or emit events to update props
-rule:
-  pattern: props.$PROP = $VALUE
-```
-
-```bash
-
-# Direct prop assignment
-ast-grep -p 'props.$PROP = $VALUE' --lang js
-```
-
-**Missing Keys in v-for**
-```bash
-
-# Search in Vue templates
-ast-grep -p 'v-for="$ITEM in $LIST"' --lang html
-
-# Check if :key is present nearby
-```
-
-**Options API in Composition API Codebase**
-```bash
-
-# Find Options API usage
-ast-grep -p 'export default { data() { $$$ } }' --lang js
-ast-grep -p 'export default { methods: { $$$ } }' --lang js
-ast-grep -p 'export default { computed: { $$$ } }' --lang js
-
-
-# vs Composition API
-ast-grep -p 'defineComponent({ setup($$$) { $$$ } })' --lang js
-```
-
-**Reactive State Issues**
-```bash
-
-# Destructuring reactive state (loses reactivity)
-ast-grep -p 'const { $$$PROPS } = $REACTIVE' --lang js
-
-
-# Should use toRefs
-ast-grep -p 'const { $$$PROPS } = toRefs($REACTIVE)' --lang js
-```
-
-
-### 3. TypeScript Quality Issues
-
-**Excessive `any` Usage**
-```bash
-ast-grep -p ': any' --lang ts
-ast-grep -p 'as any' --lang ts
-ast-grep -p '<any>' --lang ts
-```
-
-**Non-null Assertions**
-```bash
-ast-grep -p '$VAR!' --lang ts
-ast-grep -p '$VAR!.$PROP' --lang ts
-```
-
-**Type Assertions Instead of Guards**
-```bash
-ast-grep -p '$VAR as $TYPE' --lang ts
-```
-
-**Missing Return Types**
-```bash
-
-# Functions without return type annotations
-ast-grep -p 'function $NAME($$$) { $$$ }' --lang ts
-
-# Check if return type is present
-```
-
-
-### 4. Async/Promise Patterns
-
-**Unhandled Promises**
-```bash
-
-# Promise without await or .then/.catch
-ast-grep -p '$ASYNC_FUNC($$$)' --lang js
-
-# Context: check if result is used
-
-
-# Floating promises (no await)
-ast-grep -p '$PROMISE_RETURNING()' --lang ts
-```
-
-**Nested Callbacks (Pyramid of Doom)**
-```bash
-ast-grep -p '$F1($$$, function($$$) { $F2($$$, function($$$) { $F3($$$, function($$$) { $$$ }) }) })' --lang js
-```
-
-**Promise Constructor Anti-pattern**
-```bash
-
-# Wrapping already-async code in new Promise
-ast-grep -p 'new Promise(($RESOLVE, $REJECT) => { $ASYNC_FUNC($$$).then($$$) })' --lang js
-```
-
-
-### 5. Code Complexity
-
-**Long Functions (Manual Review)**
-```bash
-
-# Find function definitions, then count lines
-ast-grep -p 'function $NAME($$$) { $$$ }' --lang js --json | jq '.[] | select(.range.end.line - .range.start.line > 50)'
-```
-
-**Deep Nesting**
-```bash
-
-# Nested if statements (4+ levels)
-ast-grep -p 'if ($A) { if ($B) { if ($C) { if ($D) { $$$ } } } }' --lang js
-```
-
-**Large Parameter Lists**
-```bash
-ast-grep -p 'function $NAME($A, $B, $C, $D, $E, $$$)' --lang js
-```
-
-**Cyclomatic Complexity Indicators**
-```bash
-
-# Multiple conditionals in single function
-ast-grep -p 'if ($$$) { $$$ } else if ($$$) { $$$ } else if ($$$) { $$$ }' --lang js
-```
-
-
-### 6. React/Pinia Store Patterns
-
-**Direct State Mutation (Pinia)**
-```bash
-
-# Direct store state mutation outside actions
-ast-grep -p '$STORE.$STATE = $VALUE' --lang js
-```
-
-**Missing Dependencies in useEffect**
-```bash
-ast-grep -p 'useEffect(() => { $$$ }, [])' --lang jsx
-
-# Check if variables used inside are in dependency array
-```
-
-**Inline Functions in JSX**
-```bash
-ast-grep -p '<$COMPONENT onClick={() => $$$} />' --lang jsx
-ast-grep -p '<$COMPONENT onChange={() => $$$} />' --lang jsx
-```
-
-
-### 7. Memory & Performance
-
-**Event Listeners Without Cleanup**
-```bash
-ast-grep -p 'addEventListener($EVENT, $HANDLER)' --lang js
-
-# Check for corresponding removeEventListener
-```
-
-**setInterval Without Cleanup**
-```bash
-ast-grep -p 'setInterval($$$)' --lang js
-
-# Check for clearInterval
-```
-
-**Large Arrays in Computed/Memos**
-```bash
-ast-grep -p 'computed(() => $ARRAY.filter($$$))' --lang js
-ast-grep -p 'useMemo(() => $ARRAY.filter($$$), [$$$])' --lang jsx
-```
-
-
-### 8. Security Concerns
-
-**eval Usage**
-```bash
-ast-grep -p 'eval($$$)' --lang js
-ast-grep -p 'new Function($$$)' --lang js
-```
-
-**innerHTML Assignment (XSS Risk)**
-```bash
-ast-grep -p '$ELEM.innerHTML = $$$' --lang js
-ast-grep -p 'dangerouslySetInnerHTML={{ __html: $$$ }}' --lang jsx
-```
-
-**Hardcoded Secrets**
-```bash
-ast-grep -p "apiKey: '$$$'" --lang js
-ast-grep -p "password = '$$$'" --lang js
-ast-grep -p "secret: '$$$'" --lang js
-```
-
-**SQL String Concatenation**
-```bash
-ast-grep -p '"SELECT * FROM " + $VAR' --lang js
-ast-grep -p '`SELECT * FROM ${$VAR}`' --lang js
-```
-
-
-### 9. Python Anti-patterns
-
-**Bare Except**
-```bash
-ast-grep -p 'except: $$$' --lang py
-```
-
-**Mutable Default Arguments**
-```bash
-ast-grep -p 'def $FUNC($ARG=[])' --lang py
-ast-grep -p 'def $FUNC($ARG={})' --lang py
-```
-
-**Global Variable Usage**
-```bash
-ast-grep -p 'global $VAR' --lang py
-```
-
-**Type: ignore Without Reason**
-```bash
-
-# Search in comments via grep
-grep -r "# type: ignore$" --include="*.py"
-```
-
-
-## Parallel Analysis Strategy
-
-When analyzing a codebase, launch multiple agents in parallel to maximize efficiency:
-
-
-### Agent Delegation Pattern
-
-```markdown
-1. **Language Detection Agent** (Explore)
-   - Detect project languages and frameworks
-   - Identify relevant file patterns
-
-2. **JavaScript/TypeScript Agent** (code-analysis or Explore)
-   - JS anti-patterns
-   - TypeScript quality issues
-   - Async/Promise patterns
-
-3. **Framework-Specific Agent** (code-analysis or Explore)
-   - Vue 3 anti-patterns (if Vue detected)
-   - React anti-patterns (if React detected)
-   - Pinia/Redux patterns (if detected)
-
-4. **Security Agent** (security-audit)
-   - Security concerns
-   - Hardcoded values
-   - Injection risks
-
-5. **Complexity Agent** (code-analysis or Explore)
-   - Code complexity metrics
-   - Long functions
-   - Deep nesting
-
-6. **Python Agent** (if Python detected)
-   - Python anti-patterns
-   - Type annotation issues
-```
-
-
-### Consolidation
-
-After parallel analysis completes:
-1. Aggregate findings by severity (critical, high, medium, low)
-2. Group by category (security, performance, maintainability)
-3. Provide actionable remediation suggestions
-4. Prioritize fixes based on impact
-
-
-## YAML Rule Examples
-
-
-### Complete Anti-pattern Rule
-
-```yaml
-id: no-empty-catch
-language: JavaScript
-severity: warning
-message: Empty catch block suppresses errors silently
-note: |
-  Empty catch blocks hide errors and make debugging difficult.
-  Either log the error, handle it specifically, or re-throw.
-
-rule:
-  pattern: try { $$$ } catch ($E) { }
-
-fix: |
-  try { $$$ } catch ($E) {
-    console.error('Error:', $E);
-    throw $E;
-  }
-
-files:
-  - 'src/**/*.js'
-  - 'src/**/*.ts'
-ignores:
-  - '**/*.test.js'
-  - '**/node_modules/**'
-```
-
-
-### Vue Props Mutation Rule
-
-```yaml
-id: no-props-mutation
-language: JavaScript
-severity: error
-message: Never mutate props directly - use emit or local copy
-
-rule:
-  all:
-    - pattern: props.$PROP = $VALUE
-    - inside:
-        kind: function_declaration
-
-note: |
-  Props should be treated as immutable. To modify data:
-  1. Emit an event to parent: emit('update:propName', newValue)
-  2. Create a local ref: const local = ref(props.propName)
-```
-
-
-## Integration with Commands
-
-This skill is designed to work with the `/code:antipatterns` command, which:
-1. Detects project language stack
-2. Launches parallel specialized agents
-3. Consolidates findings into prioritized report
-4. Suggests automated fixes where possible
-
-
-## Best Practices for Analysis
-
-1. **Start with language detection** - Run appropriate patterns for detected languages
-2. **Use parallel agents** - Don't sequentially analyze; delegate to specialized agents
-3. **Prioritize by severity** - Security issues first, then correctness, then style
-4. **Provide fixes** - Don't just identify problems; suggest solutions
-5. **Consider context** - Some "anti-patterns" are acceptable in specific contexts
-6. **Check test files separately** - Different standards may apply to test code
-
-
-## Severity Levels
-
-| Severity | Description | Examples |
-|----------|-------------|----------|
-| **Critical** | Security vulnerabilities, data loss risk | eval(), SQL injection, hardcoded secrets |
-| **High** | Bugs, incorrect behavior | Props mutation, unhandled promises, empty catch |
-| **Medium** | Maintainability issues | Magic numbers, deep nesting, large functions |
-| **Low** | Style/preference | var usage, console.log, inline functions |
-
-
-## Resources
-
-- **ast-grep Documentation**: https://ast-grep.github.io/
-- **ast-grep Playground**: https://ast-grep.github.io/playground.html
-- **OWASP Top 10**: https://owasp.org/www-project-top-ten/
-- **Clean Code Principles**: https://clean-code-developer.com/
-
----
-
 ## code-lint
 
-## Linting Execution
+## Execution
+
+Run this lint pass:
 
 
-### Python
-{{ if PROJECT_TYPE == "python" }}
-Run Python linters:
-1. Ruff check: `uv run ruff check ${1:-.} --output-format=concise ${2:+--fix}`
-2. Type checking: `uv run ty check ${1:-.} --hide-progress`
-3. Format check: `uv run ruff format ${1:-.} ${3:+--check}`
-4. Security: `uv run bandit -r ${1:-.}`
-{{ endif }}
+### Step 0: One-shot path (preferred when no `PATH` is given)
 
+When the caller passed no path (or passed `.`), the bundled detector already does
+detection, tool discovery, and fixing in a single call:
 
-### JavaScript/TypeScript
-{{ if PROJECT_TYPE == "node" }}
-Run JavaScript/TypeScript linters:
-1. ESLint: `npm run lint ${1:-.} ${2:+-- --fix}`
-2. Prettier: `npx prettier ${3:+--write} ${3:---check} ${1:-.}`
-3. TypeScript: `npx tsc --noEmit`
-{{ endif }}
-
-
-### Rust
-{{ if PROJECT_TYPE == "rust" }}
-Run Rust linters:
-1. Clippy: `cargo clippy --message-format=short -- -D warnings`
-2. Format: `cargo fmt ${3:+} ${3:--- --check}`
-3. Check: `cargo check`
-{{ endif }}
-
-
-### Go
-{{ if PROJECT_TYPE == "go" }}
-Run Go linters:
-1. Go fmt: `gofmt ${3:+-w} ${3:+-l} ${1:-.}`
-2. Go vet: `go vet ./...`
-3. Staticcheck: `staticcheck ./...` (if available)
-{{ endif }}
-
-
-## Pre-commit Integration
-
-If pre-commit is configured:
 ```bash
-pre-commit run --all-files ${2:+--show-diff-on-failure}
+bash "${CLAUDE_PLUGIN_ROOT}/skills/code-lint/scripts/detect-and-fix.sh"
+bash "${CLAUDE_PLUGIN_ROOT}/skills/code-lint/scripts/detect-and-fix.sh" --check-only
 ```
 
+Pass `--check-only` unless `FIX` is set. It detects biome, eslint, prettier,
+ruff, black, clippy, rustfmt, gofmt, golangci-lint, and shellcheck, reports which
+were found, and shows modified files. Report its output and stop.
 
-## Multi-Language Projects
-
-For projects with multiple languages:
-1. Detect all language files
-2. Run appropriate linters for each language
-3. Aggregate results
+Continue to Step 1 when the caller scoped the run to a specific `PATH`, or when
+the detector reports no linters found.
 
 
-## Fallback Strategy
+### Step 1: Detect the project language
 
-If no specific linters found:
-1. Check for Makefile: `make lint`
-2. Check for npm scripts: `npm run lint`
-3. Suggest installing appropriate linters via `/deps:install --dev`
-4. Suggest configuring project linting standards via /configure:linting
+Read the `Package files` line from Context above (or `ls` the target directory)
+and map each marker file to a language. **The signals are the marker files — do
+not guess from file extensions or the repo name.**
+
+| Marker file present in the repo root | Language |
+|---|---|
+| `pyproject.toml`, `setup.py`, `requirements.txt` | Python |
+| `package.json` | JavaScript / TypeScript |
+| `Cargo.toml` | Rust |
+| `go.mod` | Go |
+
+- **Exactly one match** → run that row of Step 2.
+- **Several matches** (polyglot repo) → run each matching row, then aggregate the
+  results into one summary. Do not pick one arbitrarily.
+- **No match** → skip to Step 3.
+
+
+### Step 2: Run the row for each detected language
+
+Run the **Lint** and **Format** commands for every detected language. Swap in the
+`--fix` / `--format` variants only when the caller set those flags.
+
+| Language | Lint (always) | Lint with `--fix` | Format check (default) | Format with `--format` |
+|---|---|---|---|---|
+| Python | `uv run ruff check PATH --output-format=concise` | `uv run ruff check PATH --output-format=concise --fix` | `uv run ruff format --check PATH` | `uv run ruff format PATH` |
+| JavaScript / TypeScript | `npx eslint PATH` | `npx eslint PATH --fix` | `npx prettier --check PATH` | `npx prettier --write PATH` |
+| Rust | `cargo clippy --message-format=short -- -D warnings` | `cargo clippy --fix --allow-dirty` | `cargo fmt -- --check` | `cargo fmt` |
+| Go | `go vet ./...` | (no autofix — fix by hand) | `gofmt -l PATH` | `gofmt -w PATH` |
+
+Then run each detected language's extra checks:
+
+| Language | Extra checks |
+|---|---|
+| Python | `uv run ty check PATH --hide-progress`, `uv run bandit -q -r PATH` |
+| JavaScript / TypeScript | `npx tsc --noEmit` |
+| Rust | `cargo check` |
+| Go | `staticcheck ./...` (only if installed) |
+
+When the repo defines its own lint script (`npm run lint`, a `just lint` recipe),
+prefer it over the raw command above — it encodes the project's own flags.
+
+
+### Step 3: Fallback when no language was detected
+
+In order, stopping at the first that applies:
+
+1. `Makefile` present → `make lint`
+2. `package.json` with a `lint` script → `npm run lint`
+3. Otherwise report that no linters were found, and suggest `/deps:install --dev`
+   and `/configure:linting`.
+
+
+### Step 4: Pre-commit integration
+
+If the `Pre-commit config` line in Context is non-empty:
+
+| Caller flags | Command |
+|---|---|
+| default | `pre-commit run --all-files` |
+| `--fix` | `pre-commit run --all-files --show-diff-on-failure` |
+
+
+## Autofix Command Reference
+
+| Language | Linter | Autofix Command |
+|----------|--------|-----------------|
+| TypeScript/JS | biome | `npx @biomejs/biome check --write .` |
+| TypeScript/JS | biome format | `npx @biomejs/biome format --write .` |
+| Python | ruff | `ruff check --fix .` |
+| Python | ruff format | `ruff format .` |
+| Rust | clippy | `cargo clippy --fix --allow-dirty` |
+| Rust | rustfmt | `cargo fmt` |
+| Go | gofmt | `gofmt -w .` |
+| Go | go mod | `go mod tidy` |
+| Shell | shellcheck | No autofix (manual only) |
+
+
+### Common Fix Patterns
+
+**JavaScript/TypeScript (Biome)**: unused imports, prefer-const (`let x = 5` → `const x = 5`).
+
+**Python (Ruff)**: import sorting (I001), unused imports (F401), long lines auto-wrapped.
+
+**Rust (Clippy)**: redundant clone, `match` → `if let` for single-arm patterns.
+
+**Shell (ShellCheck — manual fixes)**: quote variables (`$var` → `"$var"`), use `$()` instead of backticks.
+
+
+### When to Escalate from Autofix
+
+Stop autofix and use a different approach when:
+- Fix requires understanding business logic
+- Multiple files need coordinated changes
+- Warning indicates a potential bug (not just style)
+- Security-related linter rule
+- Type error requires interface/API changes
 
 
 ## Post-lint Actions
@@ -676,27 +291,63 @@ Systematic extraction of duplicated code into shared, tested abstractions.
 Execute this 7-step consolidation workflow. Use TodoWrite to track each extraction as a separate task.
 
 
-### Step 1: Scan for duplicated patterns
+### Step 1: Discover duplicate clusters (deterministic clone detection)
 
-Scan the target path for duplicated patterns. Search for these duplication signals:
+Enumerate duplicate ranges with a deterministic clone detector, then read **only the reported ranges** — not whole candidate files. This keeps discovery reproducible and cheap. Token-based detection (jscpd) finds copy-paste independent of whitespace/formatting and of the enclosing symbol name — clone pairs a name-based Grep misses when the wrapping function is renamed. ast-grep (1b) then adds tolerance for variables renamed *inside* the block.
 
-**Identical function bodies:**
+#### 1a. Token-based near-duplicates with jscpd
+
+`jscpd` is a token-based copy/paste detector that supports 150+ languages despite the "js" in the name; `npx` runs it with no global install. Run it over the target path:
+
+```bash
+npx jscpd --reporters json --min-tokens 50 --output /tmp/jscpd-dry --silent <path>
 ```
-Grep for function/method signatures that appear in multiple files.
-Look for identical multi-line blocks (3+ lines) across files.
+
+It writes `/tmp/jscpd-dry/jscpd-report.json`. Read that report and parse its `duplicates` array — each entry gives the exact file/line ranges of a clone pair plus its size in tokens/lines:
+
+```json
+{
+  "duplicates": [
+    {
+      "format": "tsx",
+      "lines": 12,
+      "tokens": 84,
+      "firstFile":  { "name": "src/UserList.tsx",  "start": 20, "end": 32 },
+      "secondFile": { "name": "src/OrderList.tsx", "start": 15, "end": 27 }
+    }
+  ],
+  "statistics": { "total": { "clones": 3, "duplicatedLines": 40, "duplicatedTokens": 252, "percentage": 5.1 } }
+}
 ```
 
-**Repeated inline patterns:**
+For each reported clone, **Read only the line ranges** (`Read` with `offset`/`limit` around `start`/`end`) to confirm the duplication and classify it — do not Read whole candidate files. jscpd similarity is high by construction for a reported clone (a `--min-tokens` match); note the tokens/lines for the Extraction Plan.
+
+#### 1b. Structural confirmation with ast-grep
+
+Once jscpd surfaces a cluster, confirm it is the same *shape* — same call-shape / same block modulo captured variables — with ast-grep metavariables. `$VAR` / `$INIT` match any identifier/expression, so a block differing only in renamed captures still matches:
+
+```bash
+ast-grep -p 'const $VAR = useState($INIT)' --lang tsx <path>
+```
+
+Use this to separate a genuine extractable duplicate from a coincidental token overlap before planning the extraction. (For a standalone structural search without extraction, use the `ast-grep-search` skill.)
+
+#### 1c. Graceful fallback (Grep) when the detector is unavailable
+
+When `npx`/`jscpd` is unavailable, or the ecosystem has no `npx` on PATH, fall back to agent-driven text search:
+
+1. Use Grep to find repeated function names, variable patterns, and import clusters
+2. Use Glob to identify files with similar structure (e.g., all `*List.tsx`, all `*Detail.tsx`)
+3. Read candidate files to confirm duplication and measure scope
+
+This fallback has lower recall for near-duplicates (renamed variables, reordered params) — prefer the jscpd path when available, and reserve Grep for when it is not.
+
+**Duplication signals to classify** (both the jscpd and the Grep path feed the same categories in Step 2):
 - Utility functions defined identically in multiple files (string truncation, date formatting, validation)
 - Identical error handling blocks (try/catch patterns, error state JSX)
 - Copy-pasted UI fragments (pagination controls, confirmation dialogs, loading states)
 - Repeated hook/state management patterns (delete confirmation + mutation + handler)
 - Duplicated import blocks that signal repeated inline implementations
-
-**Search strategy:**
-1. Use Grep to find repeated function names, variable patterns, and import clusters
-2. Use Glob to identify files with similar structure (e.g., all `*List.tsx`, all `*Detail.tsx`)
-3. Read candidate files to confirm duplication and measure scope
 
 
 ### Step 2: Classify duplications
@@ -736,8 +387,12 @@ Present the plan to the user before proceeding (unless `--dry-run` was not speci
 - Replaces: [N] identical blocks across [M] files
 - Consumers: [list of files]
 - Parameters: [any variations that need to be parameterized]
+- Duplicated: [N] tokens / [N] lines (from jscpd; blank when the Grep fallback was used)
+- Similarity: [N]% (from jscpd; "exact" when ast-grep-confirmed as the same shape)
 - Estimated lines saved: [N]
 ```
+
+The `Duplicated` and `Similarity` fields come from jscpd's report (tokens/lines per clone, and the cluster's percentage) — a quantified `--dry-run` report instead of a best-effort narrative. When the Grep fallback (1c) supplied the cluster, leave them blank or note "grep-estimated".
 
 
 ### Step 4: Extract shared abstractions
@@ -839,405 +494,3 @@ After all phases complete, report:
 
 - If dead code detected during consolidation → `/code:dead-code`
 - If complexity is high after consolidation → `/code:complexity`
-
----
-
-## code-silent-degradation
-
-# Silent Degradation Scanner
-
-Detect code patterns where operations complete "successfully" but produce empty or useless results because preconditions are silently unmet.
-
-
-## Execution
-
-Execute this silent degradation scan:
-
-
-### Step 1: Discover source files
-
-Use Glob to find source files in the target path:
-- `**/*.ts`, `**/*.tsx`, `**/*.js`, `**/*.jsx` for TypeScript/JavaScript
-- `**/*.py` for Python
-- `**/*.go` for Go
-- `**/*.rs` for Rust
-
-Exclude `node_modules`, `dist`, `build`, `.git`, `vendor`, `__pycache__` directories.
-
-
-### Step 2: Scan for silent degradation patterns
-
-Search each source file for these five pattern categories. Use Grep and Read to find matches.
-
-#### Pattern 1: Silent skip on missing config
-
-Code that checks for a config value and silently returns empty results when absent.
-
-Indicators:
-- `if (!apiKey)` or `if not api_key:` followed by `return []` or `return 0` or `continue`
-- Environment variable checks that skip entire code paths without logging
-- Feature flag checks that silently disable functionality
-- `process.env.X` or `os.environ.get()` or `os.Getenv()` used in conditions that gate result-producing logic
-
-Example of the problem:
-```typescript
-// Silently returns nothing when Gemini isn't configured
-if (!config.geminiApiKey) {
-  return { suggestions: [] };  // No warning, no status
-}
-```
-
-#### Pattern 2: Success message on zero results
-
-Code that reports success regardless of whether meaningful work was performed.
-
-Indicators:
-- Success/completion messages that don't distinguish between "found results" and "found nothing because preconditions failed"
-- Toast/notification/banner showing success with `count === 0`
-- Log messages like "Completed" or "Done" or "Scan finished" when result set is empty
-- HTTP 200 responses with empty arrays where the emptiness indicates a configuration problem, not genuinely zero matches
-
-Example of the problem:
-```typescript
-// Green banner whether it found 50 items or 0
-toast.success(`Scan completed. Created ${results.length} suggestions.`);
-```
-
-#### Pattern 3: Multi-step operations with silent step skipping
-
-Operations composed of multiple detectors/processors/steps where individual steps are skipped without surfacing this to the caller.
-
-Indicators:
-- Loop over detectors/analyzers/processors that catches errors and continues
-- Skipped steps added to a list but not surfaced in the UI
-- `try/catch` blocks that swallow errors and continue iteration
-- Conditional execution of steps where skip reasons aren't propagated to the final result
-
-Example of the problem:
-```typescript
-for (const detector of detectors) {
-  if (!detector.isAvailable()) {
-    skipped.push(detector.name);  // Tracked but never shown
-    continue;
-  }
-  results.push(...detector.run());
-}
-// skipped list exists but UX ignores it
-```
-
-#### Pattern 4: Missing precondition validation
-
-Functions that require preconditions (data present, services configured, dependencies available) but don't validate or communicate them upfront.
-
-Indicators:
-- Functions that query a data source and produce results only if specific data shapes exist (e.g., "entities with embeddings", "orphan records", "records older than N days")
-- No upfront check for whether the precondition is satisfiable
-- No documentation or runtime message explaining what data/config is needed
-- Database queries that naturally return empty when prerequisite data hasn't been set up
-
-Example of the problem:
-```python
-
-# Returns empty if no themes have embeddings - but doesn't check or warn
-def find_similar_themes(threshold=0.85):
-    themes = db.query(Theme).filter(Theme.embedding.isnot(None)).all()
-    # If no embeddings exist, this silently returns []
-    pairs = [(a, b) for a, b in combinations(themes, 2)
-             if cosine_similarity(a.embedding, b.embedding) > threshold]
-    return pairs
-```
-
-#### Pattern 5: Degraded mode without indication
-
-Code that falls back to a degraded mode of operation (fewer features, reduced functionality) without any indication to the user that they're getting a partial experience.
-
-Indicators:
-- Feature availability checks that reduce functionality without notification
-- Graceful degradation that's invisible to users
-- Optional dependency checks that silently disable capabilities
-- API version checks that fall back to limited functionality
-
-Example of the problem:
-```typescript
-// User has no idea they're getting a degraded scan
-const detectors = [basicDetector];
-if (geminiKey) detectors.push(aiDetector);      // silently omitted
-if (hasEmbeddings) detectors.push(simDetector);  // silently omitted
-return runDetectors(detectors);  // runs 1 of 3 with no indication
-```
-
-
-### Step 3: Classify and report findings
-
-For each finding, report:
-
-| Field | Content |
-|-------|---------|
-| **File** | `file:line` reference |
-| **Pattern** | Which of the 5 patterns it matches |
-| **Severity** | `high` (success message on empty), `medium` (silent skip), `low` (missing validation) |
-| **What happens** | Describe the silent failure from the user's perspective |
-| **Preconditions** | List what must be true for the code to produce results |
-| **Fix** | Specific code change to surface the degradation |
-
-Severity guide:
-- **High**: User sees explicit success messaging when nothing worked (Pattern 2, 3)
-- **Medium**: Functionality silently disabled based on config/environment (Pattern 1, 5)
-- **Low**: Missing upfront validation that would help users understand requirements (Pattern 4)
-
-
-### Step 4: Generate summary
-
-Print a summary table:
-
-```
-Silent Degradation Scan: <path>
-
-| Pattern                    | Findings | Severity |
-|----------------------------|----------|----------|
-| Silent config skip         | N        | medium   |
-| Success on zero results    | N        | high     |
-| Silent step skipping       | N        | high     |
-| Missing precondition check | N        | low      |
-| Degraded mode hidden       | N        | medium   |
-
-Total: N findings across M files
-```
-
-
-### Step 5: Apply fixes (if --fix)
-
-If `--fix` is specified, apply these fixes for each finding:
-
-1. **Silent config skip**: Add warning log before the early return
-2. **Success on zero results**: Change success message to distinguish "nothing found" from "couldn't check" and surface skip reasons
-3. **Silent step skipping**: Propagate skipped step information to the return value and surface in UI
-4. **Missing precondition check**: Add upfront validation with descriptive error messages listing what's needed
-5. **Degraded mode hidden**: Add status indicator showing which capabilities are active vs disabled
-
-After applying fixes, list all changes made with `file:line` references.
-
-
-## Recommended Fixes Reference
-
-
-### Fix: Add precondition status panel
-
-Before running multi-detector operations, check and display precondition status:
-
-```typescript
-// Before
-const results = await runScan();
-toast.success(`Done. ${results.length} found.`);
-
-// After
-const status = checkPreconditions();
-if (status.issues.length > 0) {
-  showPreconditionPanel(status);  // "Gemini: not configured, Embeddings: 0 themes"
-}
-const results = await runScan();
-toast.info(`Scan: ${results.active}/${results.total} detectors ran. ${results.length} found.`);
-```
-
-
-### Fix: Distinguish "nothing found" from "couldn't check"
-
-```typescript
-// Before
-return { success: true, count: results.length };
-
-// After
-return {
-  success: true,
-  count: results.length,
-  skipped: skippedDetectors,
-  degraded: activeDetectors.length < totalDetectors,
-  missingPreconditions: missingPrereqs,
-};
-```
-
-
-## Related Configure Skills
-
-- If error tracking not configured → `/configure:sentry` for error monitoring
-- If feature flags not managed → `/configure:feature-flags` for controlled rollouts
-
----
-
-## code-lint-fix
-
-# Linter Autofix Patterns
-
-Quick reference for running linter autofixes across languages.
-
-
-## Autofix Commands
-
-| Language | Linter | Autofix Command |
-|----------|--------|-----------------|
-| TypeScript/JS | biome | `npx @biomejs/biome check --write .` |
-| TypeScript/JS | biome format | `npx @biomejs/biome format --write .` |
-| Python | ruff | `ruff check --fix .` |
-| Python | ruff format | `ruff format .` |
-| Rust | clippy | `cargo clippy --fix --allow-dirty` |
-| Rust | rustfmt | `cargo fmt` |
-| Go | gofmt | `gofmt -w .` |
-| Go | go mod | `go mod tidy` |
-| Shell | shellcheck | No autofix (manual only) |
-
-
-## Common Fix Patterns
-
-
-### JavaScript/TypeScript (Biome)
-
-**Unused imports**
-```typescript
-// Before
-import { useState, useEffect, useMemo } from 'react';
-// Only useState used
-
-// After
-import { useState } from 'react';
-```
-
-**Prefer const**
-```typescript
-// Before
-let x = 5;  // Never reassigned
-
-// After
-const x = 5;
-```
-
-
-### Python (Ruff)
-
-**Import sorting (I001)**
-```python
-
-# Before
-import os
-from typing import List
-import sys
-
-
-# After
-import os
-import sys
-from typing import List
-```
-
-**Unused imports (F401)**
-```python
-
-# Before
-import os
-import sys  # unused
-
-
-# After
-import os
-```
-
-**Line too long (E501)**
-```python
-
-# Before
-result = some_function(very_long_argument_one, very_long_argument_two, very_long_argument_three)
-
-
-# After
-result = some_function(
-    very_long_argument_one,
-    very_long_argument_two,
-    very_long_argument_three,
-)
-```
-
-
-### Rust (Clippy)
-
-**Redundant clone**
-```rust
-// Before
-let s = String::from("hello").clone();
-
-// After
-let s = String::from("hello");
-```
-
-**Use if let**
-```rust
-// Before
-match option {
-    Some(x) => do_something(x),
-    None => {},
-}
-
-// After
-if let Some(x) = option {
-    do_something(x);
-}
-```
-
-
-### Shell (ShellCheck)
-
-**Quote variables (SC2086)**
-```bash
-
-# Before
-echo $variable
-
-
-# After
-echo "$variable"
-```
-
-**Use $(...) instead of backticks (SC2006)**
-```bash
-
-# Before
-result=`command`
-
-
-# After
-result=$(command)
-```
-
-
-## Quick Autofix (Recommended)
-
-Auto-detect project linters and run all appropriate fixers in one command:
-
-```bash
-
-# Fix mode: detect linters and apply all autofixes
-bash "${CLAUDE_PLUGIN_ROOT}/skills/code-lint-fix/scripts/detect-and-fix.sh"
-
-
-# Check-only mode: report issues without fixing
-bash "${CLAUDE_PLUGIN_ROOT}/skills/code-lint-fix/scripts/detect-and-fix.sh" --check-only
-```
-
-The script detects biome, eslint, prettier, ruff, black, clippy, rustfmt, gofmt, golangci-lint, and shellcheck. It reports which linters were found, runs them, and shows modified files. See [scripts/detect-and-fix.sh](scripts/detect-and-fix.sh) for details.
-
-
-## Manual Workflow
-
-1. Run autofix first: `ruff check --fix . && ruff format .`
-2. Check remaining issues: `ruff check .`
-3. Manual fixes for complex cases
-4. Verify: re-run linter to confirm clean
-
-
-## When to Escalate
-
-Stop and use different approach when:
-- Fix requires understanding business logic
-- Multiple files need coordinated changes
-- Warning indicates potential bug (not just style)
-- Security-related linter rule
-- Type error requires interface/API changes
-- No linter configured → suggest /configure:linting or /configure:formatting

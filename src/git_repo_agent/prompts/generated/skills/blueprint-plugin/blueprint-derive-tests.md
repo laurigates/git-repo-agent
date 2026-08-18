@@ -49,56 +49,37 @@ Scan for test framework and conventions:
 If no test framework detected → Warn user, continue with file-based detection only.
 
 
-### Step 4: Extract and classify commits
+### Step 4: Classify commits and detect coverage gaps
 
-Extract fix and feature commits within scope:
+Run the helper. It owns the deterministic core: classifying `fix:`/`feat:`
+commits from `git log`, detecting whether each commit carried an inline
+test-file change (`git show --name-only`), and assigning a severity via the
+fixed matrix (`fix:` + no inline test → CRITICAL; `feat:` + no inline test →
+MEDIUM; any commit shipping a test → COVERED). Pass `--limit` to cap the scan
+(default 200; pass `--limit 50` for `--quick`):
 
-1. **Primary targets** — `fix:` commits (highest priority for regression tests):
-   ```bash
-   git log --format="%H %s" {scope} | grep -E "^[a-f0-9]+ fix(\(.*\))?:"
-   ```
+```bash
+bash "${CLAUDE_SKILL_DIR}/scripts/blueprint-derive-tests.sh" --home-dir "$HOME" --project-dir "$(pwd)"
+```
 
-2. **Secondary targets** — `feat:` commits (should have accompanying tests):
-   ```bash
-   git log --format="%H %s" {scope} | grep -E "^[a-f0-9]+ feat(\(.*\))?:"
-   ```
+Parse `STATUS=` and `ISSUES:` from the output. `FIX_COMMITS`/`FEAT_COMMITS` are
+the classification counts; `GAPS_CRITICAL`/`GAPS_MEDIUM`/`GAPS_TOTAL` are the
+coverage gaps; each `coverage_gap` issue carries `SHA=`, `TYPE=`, `SEVERITY=`,
+and `SUBJECT=` for the TRP table. `STATUS=ERROR` means at least one CRITICAL
+(untested fix) gap.
 
-3. **Fallback** — If conventional commit percentage < 20%, use keyword detection:
-   ```bash
-   git log --format="%H %s" {scope} | grep -iE "(fix|bug|hotfix|patch|resolve|correct)"
-   ```
-
-For each commit, record: SHA, subject, date, files changed, scope (if conventional).
-
-
-### Step 5: Analyze test coverage gaps
-
-For each commit from Step 4, check for corresponding tests:
-
-1. **Inline test changes** — Did the same commit modify test files?
-   ```bash
-   git diff-tree --no-commit-id --name-only -r {SHA} | grep -E "(test|spec|_test\.|\.test\.)"
-   ```
-
-2. **Nearby test commits** — Within 5 commits after the fix, was a test commit added?
-   ```bash
-   git log --format="%H %s" {SHA}..{SHA~5} | grep -iE "^[a-f0-9]+ test(\(.*\))?:|add.*test|test.*for"
-   ```
-
-3. **Test file exists** — For each modified source file, does a corresponding test file exist?
-   Use the source-to-test mapping from Step 3 (see [REFERENCE.md](REFERENCE.md#test-to-source-mapping) for rules per language).
-
-Classify each gap using the severity matrix from [REFERENCE.md](REFERENCE.md#severity-classification):
-
-| Severity | Criteria |
-|----------|----------|
-| Critical | `fix:` commit, no test changes, no test file exists for modified source |
-| High | `fix:` commit, no inline test changes but test file exists (test not updated) |
-| Medium | `feat:` commit, no test changes, core module affected |
-| Low | `feat:` commit, no inline tests but nearby test commit exists |
+The script's inline-test detection and base severity (CRITICAL/MEDIUM) are the
+deterministic floor. When you need the finer High/Low tiers, nearby-test-commit
+softening, or the per-language source-to-test mapping, apply the modifiers from
+[REFERENCE.md](REFERENCE.md#severity-classification) and the mapping rules in
+[REFERENCE.md](REFERENCE.md#test-to-source-mapping). For `--since`/`--scope`
+filtering, narrow the git scope with the commands in
+[REFERENCE.md](REFERENCE.md#scope-filtered-analysis) before reading the gap set.
 
 
 ### Step 6: Generate TRP document
+
+TRPs live at the **top level** under `docs/trps/` — not `docs/blueprint/trps/`. This matches the sibling derive-* skills' top-level layout. Never write TRPs under `docs/blueprint/`; that path is reserved for blueprint machinery.
 
 1. Create output directory: `mkdir -p docs/trps`
 2. Determine TRP ID:
