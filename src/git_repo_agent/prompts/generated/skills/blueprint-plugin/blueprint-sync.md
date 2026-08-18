@@ -1,4 +1,21 @@
 Check the status of generated content and offer options for modified or stale files.
+## Interaction Mode
+
+Before any closing `report to orchestrator` menu, resolve the automation config:
+
+```bash
+bash "${CLAUDE_SKILL_DIR}/../../scripts/get-automation-config.sh"
+```
+
+When `EFFECTIVE_INTERACTION_MODE=quiet` **and** this invocation was
+automation-initiated (autopilot, session bookend, drift-nudge follow-up — not
+a slash command the user typed), skip closing navigation menus ("what next?" /
+"create another?" style): apply the safe default and end with a one-line
+receipt instead. Quiet mode never skips confirmation gates that guard writes —
+only navigation menus. A direct user invocation always behaves fully
+interactively (explicit intent overrides quiet; see ADR-0020).
+
+
 ## Steps
 
 **Purpose**:
@@ -14,16 +31,39 @@ Check the status of generated content and offer options for modified or stale fi
    - If no generated content, report "Nothing to sync"
 
 2. **Check each generated rule**:
-   For each rule in `manifest.generated.rules`:
+
+   First resolve the rules directory from the manifest — never hardcode
+   `.claude/rules/`, or sync looks in the wrong place in every repo that chose
+   an isolated `generated_rules_path` in `/blueprint:init` Step 4a
+   (issues #1043, #1675, #2331):
+
+   ```bash
+   RULES_DIR=$(jq -r '.structure.generated_rules_path // ".claude/rules/"' docs/blueprint/manifest.json)
+   RULES_DIR="${RULES_DIR%/}"
+   ```
+
+   `generated.rules` is an **object map** keyed by filename (see
+   `blueprint-plugin/schemas/manifest.schema.json`), so iterate it with
+   `to_entries[]`:
+
+   ```bash
+   jq -r '(.generated.rules // {}) | to_entries[] | [.key, (.value.content_hash // ""), (.value.source_hash // "")] | @tsv' docs/blueprint/manifest.json
+   ```
+
+   For each entry, `{key}` is the rule's **bare filename including the `.md`
+   extension**, relative to `$RULES_DIR`. Resolve it as `"$RULES_DIR/{key}"` —
+   do **not** append `.md`, which would look for `development.md.md` and report
+   every registered rule as missing.
 
    a. **Verify file exists**:
       ```bash
-      test -f .claude/rules/{name}.md
+      test -f "$RULES_DIR/{key}"
       ```
 
-   b. **Hash current content**:
+   b. **Hash current content** (bare hex, matching the `content_hash` the
+      producers write — no `sha256:` prefix):
       ```bash
-      sha256sum .claude/rules/{name}.md | cut -d' ' -f1
+      sha256sum "$RULES_DIR/{key}" | cut -d' ' -f1
       ```
 
    c. **Compare hashes**:
@@ -34,12 +74,14 @@ Check the status of generated content and offer options for modified or stale fi
       - Hash current PRD content
       - Compare with `source_hash` in manifest
       - If differs → status: `stale`
+      - A record with no `source_hash` (rules written by `/blueprint:init`) is
+        never stale — only `modified` applies
 
 3. **Display sync report**:
    ```
    Generated Content Sync Status
 
-   Rules (.claude/rules/):
+   Rules ($RULES_DIR):
    ✅ architecture-patterns.md: Current
    ⚠️ testing-strategies.md: Modified locally
    🔄 implementation-guides.md: Stale (PRDs changed)

@@ -58,15 +58,43 @@ Initialize Blueprint Development in this project.
    find . -name '*.md' -not -path '*/node_modules/*' -not -path '*/.git/*' | grep -viE '(README|CHANGELOG|CONTRIBUTING|LICENSE|CODE_OF_CONDUCT|SECURITY)\.md$'
    ```
 
+   **Before recommending migration, measure cross-reference density.** Migrating
+   a doc into `docs/{prds,adrs,prps}/` rewrites its path, breaking every
+   reference to it. For each candidate doc, grep the repo for references to its
+   path **from outside `docs/`** (README, scripts, CI, `.rulesync/`) and inter-doc
+   links:
+
+   ```bash
+   # Count references to each candidate doc path (skip the doc itself)
+   for doc in $candidate_docs; do
+     base=$(basename "$doc")
+     refs=$(grep -rIl --exclude-dir=.git --exclude-dir=node_modules "$base" . | grep -v "^./$doc$" | wc -l | tr -d ' ')
+     ext=$(grep -rIl --exclude-dir=.git --exclude-dir=node_modules --exclude-dir=docs "$base" . | wc -l | tr -d ' ')
+     echo "$doc total=$refs outside_docs=$ext"
+   done
+   ```
+
+   A doc whose path is **referenced outside `docs/`** (build scripts, CI, README,
+   `.rulesync/`) is expensive to migrate — every reference must be rewritten,
+   including build-critical files. Blueprint only needs the **empty**
+   `docs/{prds,adrs,prps}/` for *future* derived docs, so "leave in place" is a
+   safe default when migration is expensive.
+
    **If documentation files found** (e.g., REQUIREMENTS.md, ARCHITECTURE.md, DESIGN.md, docs in non-standard locations):
+
+   - **Default to recommending migration** (`label: "Yes, migrate documents (Recommended)"`) **only when no candidate doc is referenced outside `docs/`**.
+   - **When one or more candidate docs are referenced outside `docs/`**, DROP the "(Recommended)" marker from the migrate option and surface the reference count so the user judges the cost. Prefer steering toward "leave in place".
+
    ```
    Use report to orchestrator:
-   question: "Found existing documentation: {file_list}. Migrate these to Blueprint-managed paths? (Strongly recommended)"
+   question: "Found existing documentation: {file_list}. {N} of these are referenced outside docs/ ({ref_summary}). Migrate to Blueprint-managed paths?"
    options:
-     - label: "Yes, migrate documents (Recommended)"
-       description: "Move docs into docs/prds/, docs/adrs/, docs/prps/ based on content type. Prevents stale and orphaned documents."
+     # When NO candidate is referenced outside docs/: keep "(Recommended)" on migrate.
+     # When ANY candidate IS referenced outside docs/: drop "(Recommended)" and show counts.
+     - label: "Yes, migrate documents"
+       description: "Move docs into docs/prds/, docs/adrs/, docs/prps/ based on content type. Rewrites all {total_refs} references — including build-critical files when referenced outside docs/."
      - label: "No, leave them in place"
-       description: "Warning: unmigrated docs may become stale or duplicated as Blueprint creates its own documents"
+       description: "Blueprint creates new docs under docs/{prds,adrs,prps}/; existing docs stay where build tooling and READMEs already point. Safe default when docs are referenced outside docs/."
    ```
 
    **If "Yes" selected:**
@@ -106,6 +134,14 @@ Initialize Blueprint Development in this project.
    - **Fully automatic**: all tasks get `auto_run: true`, default schedules
    - **Manual only**: all `auto_run: false`, all schedules set to `on-demand`
 
+   The same selection sets `automation.autonomy_level` (the ADR-0020 level
+   model — what actually *executes* the auto_run contract):
+   - **Prompt** / **Manual only** → `autonomy_level: 0` (nothing runs unattended)
+   - **Auto-run safe** → `autonomy_level: 1` (deterministic due tasks run via
+     the SessionStart probe; due agent tasks surface as drift findings)
+   - **Fully automatic** → `autonomy_level: 2` (quiet autopilot also runs due
+     agent tasks in-session; `interaction_mode` defaults to `quiet`)
+
 4a. **Ask about generated-rules output path** (use report to orchestrator):
 
    Only prompt when `.claude/rules/` already exists and contains files (i.e., hand-authored rules that pre-date blueprint). Skip silently in fresh repos and use the default.
@@ -134,13 +170,25 @@ Initialize Blueprint Development in this project.
      - label: "Yes - Detect decisions worth documenting"
        description: "Claude will notice when conversations contain architecture decisions, feature requirements, or implementation plans that should be captured as ADR/PRD/PRP documents"
      - label: "No - Manual commands only"
-       description: "Use /blueprint:derive-prd, /blueprint:derive-adr, /blueprint:prp-create explicitly when you want to create documents"
+       description: "Use /blueprint:derive-plans, /blueprint:prp-create explicitly when you want to create documents"
    ```
 
    Set `has_document_detection` in manifest based on response.
 
    **If enabled:**
-   Copy `document-management-rule.md` template to `.claude/rules/document-management.md`.
+   Resolve the rules output directory before writing — honour the path chosen in
+   Step 4a (default `.claude/rules/`) rather than hardcoding it, so blueprint
+   does not collide with rulesync-managed or hand-authored rules (issue #1675):
+
+   ```bash
+   RULES_DIR=$(jq -r '.structure.generated_rules_path // ".claude/rules/"' docs/blueprint/manifest.json)
+   mkdir -p "$RULES_DIR"
+   ```
+
+   When the manifest is not yet written, use the Step 4a selection directly
+   (default `.claude/rules/`).
+
+   Copy `document-management-rule.md` template to `$RULES_DIR/document-management.md`.
    This rule instructs Claude to watch for:
    - Architecture decisions being made during discussion → prompt to create ADR
    - Feature requirements being discussed or refined → prompt to create/update PRD
@@ -148,7 +196,21 @@ Initialize Blueprint Development in this project.
 
 6. **Create directory structure**:
 
-   **Blueprint structure (in docs/blueprint/):**
+   **Canonical document paths** are at the **top level** of `docs/`, not under `docs/blueprint/`. `docs/blueprint/` holds blueprint machinery only (manifest, feature-tracker, work-orders); `docs/{adrs,prds,prps,trps}/` hold the documents themselves. Every `/blueprint:derive-*` skill writes to the top-level paths — keeping them consistent prevents the dual-corpus bug where init creates one layout and derive-* writes to another.
+
+   Execute the creation explicitly so the directories exist even when no document migration happened in Step 3:
+
+   ```bash
+   mkdir -p docs/blueprint/work-orders/completed
+   mkdir -p docs/blueprint/work-orders/archived
+   mkdir -p docs/adrs
+   mkdir -p docs/prds
+   mkdir -p docs/prps
+   ```
+
+   Note: `docs/trps/` is created on-demand by `/blueprint:derive-tests` only — init does not pre-create it.
+
+   The resulting tree:
    ```
    docs/
    ├── blueprint/
@@ -157,29 +219,30 @@ Initialize Blueprint Development in this project.
    │   ├── work-orders/             # Task packages for subagents
    │   │   ├── completed/
    │   │   └── archived/
-   │   ├── ai_docs/                 # Curated documentation (on-demand)
-   │   │   ├── libraries/
-   │   │   └── project/
    │   └── README.md                # Blueprint documentation
-   ├── prds/                        # Product Requirements Documents
-   ├── adrs/                        # Architecture Decision Records
-   └── prps/                        # Product Requirement Prompts
+   ├── prds/                        # Product Requirements Documents (canonical)
+   ├── adrs/                        # Architecture Decision Records (canonical)
+   ├── prps/                        # Product Requirement Prompts (canonical)
+   └── trps/                        # Test Regression Plans (created on-demand by /blueprint:derive-tests)
    ```
 
-   **Claude configuration (in .claude/):**
+   **Claude configuration (in .claude/):** — initial rules are written under
+   `structure.generated_rules_path` (default `.claude/rules/`; an isolated
+   subdirectory like `.claude/rules/blueprint/` when Step 4a detected existing
+   content), shown here at the default location:
    ```
    .claude/
-   ├── rules/                       # Modular rules (including generated)
+   ├── rules/                       # $RULES_DIR — generated_rules_path (default .claude/rules/)
    │   ├── development.md           # Development workflow rules
    │   ├── testing.md               # Testing requirements
    │   └── document-management.md   # Document organization rules (if detection enabled)
    └── skills/                      # Custom skill overrides (optional)
    ```
 
-7. **Create `manifest.json`** (v3.3.0 schema — canonical filename is `docs/blueprint/manifest.json`, no dot prefix):
+7. **Create `manifest.json`** (v3.4.0 schema — canonical filename is `docs/blueprint/manifest.json`, no dot prefix):
    ```json
    {
-     "format_version": "3.3.0",
+     "format_version": "3.4.0",
      "created_at": "[ISO timestamp]",
      "updated_at": "[ISO timestamp]",
      "created_by": {
@@ -194,7 +257,6 @@ Initialize Blueprint Development in this project.
        "has_adrs": true,
        "has_prps": true,
        "has_work_orders": true,
-       "has_ai_docs": false,
        "has_modular_rules": true,
        "has_feature_tracker": "[based on user choice]",
        "has_document_detection": "[based on user choice]",
@@ -214,16 +276,15 @@ Initialize Blueprint Development in this project.
        "skills": [],
        "commands": []
      },
+     "automation": {
+       "autonomy_level": "[based on maintenance task choice: 0 for Prompt/Manual, 1 for Auto-run safe, 2 for Fully automatic]",
+       "interaction_mode": "normal",
+       "work_orders": {
+         "auto_draft": false,
+         "auto_execute": false
+       }
+     },
      "task_registry": {
-       "derive-prd": {
-         "enabled": true,
-         "auto_run": false,
-         "last_completed_at": null,
-         "last_result": null,
-         "schedule": "on-demand",
-         "stats": {},
-         "context": {}
-       },
        "derive-plans": {
          "enabled": true,
          "auto_run": false,
@@ -326,10 +387,52 @@ Initialize Blueprint Development in this project.
      populate `children[]`.
    - **Standalone**: omit the `workspaces` block entirely.
 
-8. **Create initial rules**:
-   - `development.md`: TDD workflow, commit conventions
-   - `testing.md`: Test requirements, coverage expectations
-   - `document-management.md`: Document organization rules (if decision detection enabled)
+8. **Create initial rules** under the resolved `$RULES_DIR` (the Step 4a
+   `generated_rules_path`, default `.claude/rules/`) — never a hardcoded
+   `.claude/rules/` — so they sit alongside, not on top of, rulesync-managed or
+   hand-authored rules (issue #1675):
+
+   ```bash
+   RULES_DIR=$(jq -r '.structure.generated_rules_path // ".claude/rules/"' docs/blueprint/manifest.json)
+   mkdir -p "$RULES_DIR"
+   ```
+
+   - `$RULES_DIR/development.md`: TDD workflow, commit conventions
+   - `$RULES_DIR/testing.md`: Test requirements, coverage expectations
+   - `$RULES_DIR/document-management.md`: Document organization rules (if decision detection enabled)
+
+8a. **Register the rules just written in `generated.rules`** — this step is not
+   optional. `/blueprint:sync` and the SessionStart drift probe detect staleness
+   by comparing a **registered** record's `content_hash` against the file on
+   disk, so a rule written here but never registered is invisible to both: a
+   local edit is undetectable, a revised template never propagates, and sync
+   reports clean over a set it cannot see. Nothing surfaces as an error
+   (issue #2331).
+
+   Register every rule Step 8 actually wrote — pass only the filenames that
+   exist (`document-management.md` only when decision detection was enabled in
+   Step 5):
+
+   ```bash
+   bash "${CLAUDE_SKILL_DIR}/../../scripts/register-generated-rules.sh" \
+     --source "blueprint-init" \
+     --plugin-version "3.4.0" \
+     development.md testing.md document-management.md
+   ```
+
+   The script is the same one `/blueprint:generate-rules` Step 5 uses, so the
+   two producers of `$RULES_DIR` cannot drift apart on the record shape or on
+   how the hash is computed. It resolves `$RULES_DIR` from
+   `structure.generated_rules_path` itself and writes, per rule, a
+   `generatedRecord` (`source`, `generated_at`, `plugin_version`,
+   `content_hash`, `status`) into the `generated.rules` **object map** defined by
+   `blueprint-plugin/schemas/manifest.schema.json`.
+
+   **Key form** — the manifest key is the rule's **bare filename relative to
+   `$RULES_DIR`, including the `.md` extension** (`development.md`, never
+   `development` and never `.claude/rules/development.md`). A consumer resolves
+   a rule as `"$RULES_DIR/$key"` and must **not** append `.md`. Check
+   `REGISTERED=` and `STATUS=OK` in the script's output before continuing.
 
 9. **Handle `.gitignore`**:
    - Always commit `CLAUDE.md` and `.claude/rules/` (shared project instructions)
@@ -343,14 +446,14 @@ Initialize Blueprint Development in this project.
    Blueprint structure created:
    - docs/blueprint/manifest.json
    - docs/blueprint/work-orders/
-   - docs/blueprint/ai_docs/
    - docs/blueprint/README.md
    [- docs/blueprint/feature-tracker.json (if feature tracking enabled)]
 
-   Project documentation:
+   Project documentation (top-level — derive-* skills write here):
    - docs/prds/           (Product Requirements Documents)
    - docs/adrs/           (Architecture Decision Records)
    - docs/prps/           (Product Requirement Prompts)
+   - docs/trps/           (Test Regression Plans — created on first /blueprint:derive-tests run)
 
    Claude configuration:
    - .claude/rules/       (modular rules, including generated)
@@ -396,9 +499,7 @@ Initialize Blueprint Development in this project.
 Management commands:
 - /blueprint:status          - Check version and configuration
 - /blueprint:upgrade         - Upgrade to latest format version
-- /blueprint:derive-prd      - Derive PRD from existing documentation
-- /blueprint:derive-adr      - Derive ADRs from codebase analysis
-- /blueprint:derive-plans    - Derive docs from git history
+- /blueprint:derive-plans    - Derive PRDs, ADRs, and PRPs from git history
 - /blueprint:derive-rules    - Derive rules from git commit decisions
 - /blueprint:prp-create      - Create a Product Requirement Prompt
 - /blueprint:generate-rules  - Generate rules from PRDs

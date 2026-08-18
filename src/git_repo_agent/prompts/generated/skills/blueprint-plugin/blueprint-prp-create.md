@@ -47,7 +47,7 @@ For relevant libraries/frameworks, gather:
 3. Best practices from documentation
 4. Common implementation patterns
 
-Use WebSearch/WebFetch as needed. Create or update ai_docs entries if needed (see [REFERENCE.md](REFERENCE.md#creating-ai-docs)).
+Use WebSearch/WebFetch as needed. Create or update curated rule entries if needed (see [REFERENCE.md](REFERENCE.md#creating-curated-rules)).
 
 
 ### Step 4: Generate PRP document ID and structure
@@ -67,7 +67,7 @@ Fill all required sections (see [REFERENCE.md](REFERENCE.md#prp-sections)):
 2. **Success Criteria**: Specific, testable acceptance criteria with metrics
 3. **Context**:
    - Documentation references (URLs with specific sections)
-   - ai_docs references (links to curated library docs)
+   - Curated rule references (links to `.claude/rules/` library/pattern entries)
    - **Codebase Intelligence**: File paths, code snippets with line numbers, patterns to follow
    - **Known Gotchas**: Critical warnings with mitigations
 4. **Implementation Blueprint**:
@@ -115,7 +115,7 @@ Update `docs/blueprint/manifest.json` ID registry with new PRP entry.
 Display summary showing:
 - PRP ID and location
 - Feature summary and approach
-- Context collected (ai_docs, patterns, documentation)
+- Context collected (curated rules, patterns, documentation)
 - Linked documents (source PRD if applicable)
 - Confidence score with breakdown
 - Any gaps if score < 7
@@ -128,7 +128,7 @@ Display summary showing:
 
 **If confidence < 7**, offer user choices:
 - Research more context → Use Explore agent for gaps
-- Create ai_docs entries → `/blueprint:curate-docs`
+- Create curated rule entries → `/blueprint:curate-docs`
 - Execute anyway (risky) → Proceed with warning
 - Done for now → Save incomplete PRP
 
@@ -186,9 +186,9 @@ confidence: X/10
 - [Framework Name](https://docs.example.com/api) - API endpoint for [feature]
 
 
-### ai_docs References
-- `ai_docs/libraries/[library-name].md` - Patterns for [feature type]
-- `ai_docs/project/patterns.md` - Integration pattern [X]
+### Curated Rule References
+- `.claude/rules/lib-[library-name].md` - Patterns for [feature type]
+- `.claude/rules/[pattern-name].md` - Integration pattern [X]
 
 
 ### Codebase Intelligence
@@ -428,11 +428,11 @@ Average of all 4 dimensions.
 - **< 7**: Not ready, needs more research/context
 
 
-## Creating ai_docs
+## Creating Curated Rules
 
-If you discover new patterns during research, create ai_docs entries:
+If you discover new patterns during research, create curated rule entries (via `/blueprint:curate-docs` or directly):
 
-**Location**: `docs/blueprint/ai_docs/libraries/[library-name].md` or `docs/blueprint/ai_docs/project/patterns.md`
+**Location**: `$RULES_DIR/lib-[library-name].md` or `$RULES_DIR/[pattern-name].md`, where `$RULES_DIR` is `structure.generated_rules_path` from the manifest (default `.claude/rules/`)
 
 **Format**:
 ```markdown

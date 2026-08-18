@@ -1,4 +1,21 @@
 Scan all PRDs, ADRs, PRPs, and work-orders, assign IDs to documents missing them, and update the manifest registry.
+## Interaction Mode
+
+Before any closing `report to orchestrator` menu, resolve the automation config:
+
+```bash
+bash "${CLAUDE_SKILL_DIR}/../../scripts/get-automation-config.sh"
+```
+
+When `EFFECTIVE_INTERACTION_MODE=quiet` **and** this invocation was
+automation-initiated (autopilot, session bookend, drift-nudge follow-up — not
+a slash command the user typed), skip closing navigation menus ("what next?" /
+"create another?" style): apply the safe default and end with a one-line
+receipt instead. Quiet mode never skips confirmation gates that guard writes —
+only navigation menus. A direct user invocation always behaves fully
+interactively (explicit intent overrides quiet; see ADR-0020).
+
+
 ## Prerequisites
 
 - Blueprint initialized (`docs/blueprint/manifest.json` exists)
@@ -30,117 +47,32 @@ If not, initialize it:
 ```
 
 
-### Step 2: Scan PRDs
+### Step 2: Run the read-only ID audit
+
+Run the helper. It owns the read-only scan: frontmatter `id:` extraction across
+PRDs/ADRs/PRPs/work-orders, deriving the expected `ADR-NNNN` / `WO-NNN` from each
+filename, flagging `NEEDS_ID` (no id) and `id_mismatch` (frontmatter id disagrees
+with the filename-derived expectation), and building the reverse `github_issues`
+index from the manifest registry:
 
 ```bash
-for prd in docs/prds/*.md; do
-  [ -f "$prd" ] || continue
-
-  # Check for existing ID in frontmatter
-  existing_id=$(head -50 "$prd" | grep -m1 "^id:" | sed 's/^id:[[:space:]]*//')
-
-  if [ -z "$existing_id" ]; then
-    echo "NEEDS_ID: $prd"
-  else
-    echo "HAS_ID: $prd ($existing_id)"
-  fi
-done
+bash "${CLAUDE_SKILL_DIR}/scripts/blueprint-sync-ids.sh" --home-dir "$HOME" --project-dir "$(pwd)"
 ```
 
+Parse `STATUS=` and `ISSUES:` from the output:
 
-### Step 3: Scan ADRs
+- `PRD_NEEDS_ID` / `ADR_NEEDS_ID` / `PRP_NEEDS_ID` / `WO_NEEDS_ID` and the
+  `needs_id` issues are the documents to assign IDs to in Step 7 (each carries
+  `DOC=` and, for ADRs/WOs, the `EXPECTED=` filename-derived ID).
+- `ADR_MISMATCH` / `WO_MISMATCH` and the `id_mismatch` issues (`HAS=` vs
+  `EXPECTED=`) are documents whose frontmatter id disagrees with their filename
+  — reconcile these in Step 7, never silently. `STATUS=ERROR` indicates at least
+  one mismatch.
+- `GH_ISSUE_MAPPINGS` and `MANIFEST_PRESENT` summarise the reverse-index build
+  (Step 9 detail below).
 
-```bash
-for adr in docs/adrs/*.md; do
-  [ -f "$adr" ] || continue
-
-  # ADR ID derived from filename (0001-title.md → ADR-0001)
-  filename=$(basename "$adr")
-  num=$(echo "$filename" | grep -oE '^[0-9]{4}')
-
-  if [ -n "$num" ]; then
-    expected_id="ADR-$num"
-    existing_id=$(head -50 "$adr" | grep -m1 "^id:" | sed 's/^id:[[:space:]]*//')
-
-    if [ -z "$existing_id" ]; then
-      echo "NEEDS_ID: $adr (should be $expected_id)"
-    elif [ "$existing_id" != "$expected_id" ]; then
-      echo "MISMATCH: $adr (has $existing_id, should be $expected_id)"
-    else
-      echo "HAS_ID: $adr ($existing_id)"
-    fi
-  fi
-done
-```
-
-
-### Step 4: Scan PRPs
-
-```bash
-for prp in docs/prps/*.md; do
-  [ -f "$prp" ] || continue
-
-  existing_id=$(head -50 "$prp" | grep -m1 "^id:" | sed 's/^id:[[:space:]]*//')
-
-  if [ -z "$existing_id" ]; then
-    echo "NEEDS_ID: $prp"
-  else
-    echo "HAS_ID: $prp ($existing_id)"
-  fi
-done
-```
-
-
-### Step 5: Scan Work-Orders
-
-```bash
-for wo in docs/blueprint/work-orders/*.md; do
-  [ -f "$wo" ] || continue
-
-  # WO ID derived from filename (003-task.md → WO-003)
-  filename=$(basename "$wo")
-  num=$(echo "$filename" | grep -oE '^[0-9]{3}')
-
-  if [ -n "$num" ]; then
-    expected_id="WO-$num"
-    existing_id=$(head -50 "$wo" | grep -m1 "^id:" | sed 's/^id:[[:space:]]*//')
-
-    if [ -z "$existing_id" ]; then
-      echo "NEEDS_ID: $wo (should be $expected_id)"
-    else
-      echo "HAS_ID: $wo ($existing_id)"
-    fi
-  fi
-done
-```
-
-
-### Step 6: Report Findings
-
-```
-Document ID Scan Results
-
-PRDs:
-- With IDs: X
-- Missing IDs: Y
-  - docs/prds/feature-a.md
-  - docs/prds/feature-b.md
-
-ADRs:
-- With IDs: X
-- Missing IDs: Y
-- Mismatched IDs: Z
-
-PRPs:
-- With IDs: X
-- Missing IDs: Y
-
-Work-Orders:
-- With IDs: X
-- Missing IDs: Y
-
-Total: X documents, Y need IDs
-```
+The audit is read-only; it makes no edits. Surface its counts as the Step 6
+report and proceed to the mutating steps.
 
 
 ### Step 7: Assign IDs (unless `--dry-run`)
@@ -200,7 +132,9 @@ Store in manifest registry:
 
 ### Step 9: Build GitHub Issue Index
 
-Scan all documents for `github-issues` field and build reverse index:
+The Step 2 audit already groups the manifest's per-document `github_issues`
+arrays into the reverse index (`GH_ISSUE_MAPPINGS=` reports how many distinct
+issue numbers map to documents). Write that reverse index into the manifest:
 
 ```json
 {

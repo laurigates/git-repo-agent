@@ -412,10 +412,10 @@ cargo clippy --all-targets --all-features -- -D warnings
 ```yaml
 repos:
   - repo: https://github.com/biomejs/pre-commit
-    rev: v0.4.0
+    rev: v2.4.16
     hooks:
       - id: biome-check
-        additional_dependencies: ["@biomejs/biome@1.9.4"]
+        additional_dependencies: ["@biomejs/biome@2.4.16"]
 ```
 
 
@@ -424,7 +424,7 @@ repos:
 ```yaml
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.8.4
+    rev: v0.15.15
     hooks:
       - id: ruff
         args: [--fix]
@@ -524,9 +524,8 @@ Check and configure code formatting tools against modern best practices.
 **CRITICAL**: Before flagging outdated formatters, verify latest releases using WebSearch or WebFetch:
 
 1. **Biome**: Check [biomejs.dev](https://biomejs.dev/) or [GitHub releases](https://github.com/biomejs/biome/releases)
-2. **Prettier**: Check [prettier.io](https://prettier.io/) or [npm](https://www.npmjs.com/package/prettier)
-3. **Ruff**: Check [docs.astral.sh/ruff](https://docs.astral.sh/ruff/) or [GitHub releases](https://github.com/astral-sh/ruff/releases)
-4. **rustfmt**: Bundled with Rust toolchain - check [Rust releases](https://releases.rs/)
+2. **Ruff**: Check [docs.astral.sh/ruff](https://docs.astral.sh/ruff/) or [GitHub releases](https://github.com/astral-sh/ruff/releases)
+3. **rustfmt**: Bundled with Rust toolchain - check [Rust releases](https://releases.rs/)
 
 
 ## Execution
@@ -534,35 +533,29 @@ Check and configure code formatting tools against modern best practices.
 Execute this code formatting configuration workflow:
 
 
-### Step 1: Detect project languages and existing formatters
+### Step 1: Detect formatters and integration state
 
-Check for language indicators and formatter configurations:
+Run the detection script to scan the project for formatter config files,
+script/hook/CI presence, and a recommendation over the detected booleans:
 
-| Indicator | Language | Detected Formatter |
-|-----------|----------|-------------------|
-| `biome.json` with formatter | JavaScript/TypeScript | Biome |
-| `.prettierrc.*` | JavaScript/TypeScript | Prettier |
-| `pyproject.toml` [tool.ruff.format] | Python | Ruff |
-| `pyproject.toml` [tool.black] | Python | Black (legacy) |
-| `rustfmt.toml` or `.rustfmt.toml` | Rust | rustfmt |
+```bash
+bash "${CLAUDE_SKILL_DIR}/scripts/configure-formatting.sh" --home-dir "$HOME" --project-dir "$(pwd)"
+```
+
+Parse `STATUS=` and the `ISSUES:` block from the output. The `KEY=VALUE` lines
+report formatter detection (`BIOME`, `PRETTIER`, `RUFF_FORMAT`, `BLACK`,
+`RUSTFMT`, `EDITORCONFIG`), integration signals (`FORMAT_SCRIPT`,
+`PRE_COMMIT_FORMAT`, `CI_FORMAT`), and a `RECOMMENDATION` of `configured`
+(a modern formatter is set up), `migrate` (a legacy formatter wants migration to
+Biome/Ruff), or `setup` (no formatter detected).
 
 **Modern formatting preferences:**
-- **JavaScript/TypeScript**: Biome (preferred) or Prettier
+- **JavaScript/TypeScript**: Biome (replaces Prettier + ESLint). On `RECOMMENDATION=migrate` with Prettier present, offer migration to Biome — do not configure Prettier as the target formatter.
 - **Python**: Ruff format (replaces Black)
 - **Rust**: rustfmt (standard)
 
 
-### Step 2: Analyze current formatter configuration
-
-For each detected formatter, check configuration completeness:
-1. Config file exists with required settings (indent, line width, quotes, etc.)
-2. Ignore patterns configured
-3. Format scripts defined in package.json / pyproject.toml
-4. Pre-commit hook configured
-5. CI/CD check configured
-
-
-### Step 3: Generate compliance report
+### Step 2: Generate compliance report
 
 Print a formatted compliance report:
 
@@ -585,22 +578,22 @@ Recommendations: [list specific fixes]
 If `--check-only`, stop here.
 
 
-### Step 4: Install and configure formatter (if --fix or user confirms)
+### Step 3: Install and configure formatter (if --fix or user confirms)
 
 Based on detected language and formatter preference, install and configure. Use configuration templates from .
 
 1. Install formatter package
-2. Create configuration file (biome.json, .prettierrc.json, pyproject.toml section, rustfmt.toml)
+2. Create configuration file (biome.json, pyproject.toml section, rustfmt.toml)
 3. Add format scripts to package.json or Makefile/justfile
-4. Create ignore file if needed (.prettierignore)
+4. Configure ignore patterns in the formatter config (e.g. `files.includes` in biome.json)
 
 
-### Step 5: Create EditorConfig integration
+### Step 4: Create EditorConfig integration
 
 Create or update `.editorconfig` with settings matching the formatter configuration.
 
 
-### Step 6: Handle migrations (if applicable)
+### Step 5: Handle migrations (if applicable)
 
 If legacy formatter detected (Prettier -> Biome, Black -> Ruff):
 1. Import existing configuration
@@ -612,35 +605,35 @@ If legacy formatter detected (Prettier -> Biome, Black -> Ruff):
 Use migration guides from .
 
 
-### Step 7: Configure pre-commit hooks
+### Step 6: Configure pre-commit hooks
 
 Add formatter to `.pre-commit-config.yaml` using the appropriate hook repository.
 
 
-### Step 8: Configure CI/CD integration
+### Step 7: Configure CI/CD integration
 
 Add format check step to GitHub Actions workflow.
 
 
-### Step 9: Configure editor integration
+### Step 8: Configure editor integration
 
 Create or update `.vscode/settings.json` with format-on-save and `.vscode/extensions.json` with formatter extension.
 
 
-### Step 10: Update standards tracking
+### Step 9: Update standards tracking
 
 Update `.project-standards.yaml`:
 
 ```yaml
 components:
   formatting: "2025.1"
-  formatting_tool: "[biome|prettier|ruff|rustfmt]"
+  formatting_tool: "[biome|ruff|rustfmt]"
   formatting_pre_commit: true
   formatting_ci: true
 ```
 
 
-### Step 11: Print completion report
+### Step 10: Print completion report
 
 Print a summary of changes made, scripts added, and next steps (run format, verify CI, enable format-on-save).
 
@@ -677,7 +670,7 @@ For detailed configuration templates, migration guides, and pre-commit configura
 Configuration templates, migration guides, and pre-commit configurations for code formatters.
 
 
-## Biome Configuration (Recommended for JS/TS)
+## Biome Configuration (JS/TS/JSON/CSS — the Prettier + ESLint replacement)
 
 
 ### Install
@@ -742,67 +735,6 @@ bun add --dev @biomejs/biome
     "format": "biome format --write .",
     "format:check": "biome format .",
     "lint:format": "biome check --write ."
-  }
-}
-```
-
-
-## Prettier Configuration (Alternative for JS/TS)
-
-
-### Install
-
-```bash
-npm install --save-dev prettier
-
-# or
-bun add --dev prettier
-```
-
-
-### `.prettierrc.json`
-
-```json
-{
-  "printWidth": 100,
-  "tabWidth": 2,
-  "useTabs": false,
-  "semi": true,
-  "singleQuote": true,
-  "quoteProps": "as-needed",
-  "jsxSingleQuote": false,
-  "trailingComma": "all",
-  "bracketSpacing": true,
-  "bracketSameLine": false,
-  "arrowParens": "always",
-  "endOfLine": "lf",
-  "embeddedLanguageFormatting": "auto"
-}
-```
-
-
-### `.prettierignore`
-
-```
-node_modules
-dist
-build
-.next
-coverage
-*.min.js
-*.min.css
-package-lock.json
-pnpm-lock.yaml
-```
-
-
-### package.json Scripts
-
-```json
-{
-  "scripts": {
-    "format": "prettier --write .",
-    "format:check": "prettier --check ."
   }
 }
 ```
@@ -1005,22 +937,10 @@ uv remove black
 ```yaml
 repos:
   - repo: https://github.com/biomejs/pre-commit
-    rev: v0.4.0
+    rev: v2.4.16
     hooks:
       - id: biome-check
-        additional_dependencies: ["@biomejs/biome@1.9.4"]
-```
-
-
-### Prettier
-
-```yaml
-repos:
-  - repo: https://github.com/pre-commit/mirrors-prettier
-    rev: v4.0.0-alpha.8
-    hooks:
-      - id: prettier
-        types_or: [javascript, jsx, ts, tsx, json, yaml, markdown]
+        additional_dependencies: ["@biomejs/biome@2.4.16"]
 ```
 
 
@@ -1029,7 +949,7 @@ repos:
 ```yaml
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.8.4
+    rev: v0.15.15
     hooks:
       - id: ruff-format
 ```
@@ -1054,14 +974,6 @@ repos:
 ```yaml
 - name: Check formatting
   run: npx @biomejs/biome format .
-```
-
-
-### GitHub Actions - Prettier
-
-```yaml
-- name: Check formatting
-  run: npm run format:check
 ```
 
 
@@ -1569,7 +1481,7 @@ tests/
   run: npm test -- --reporter=junit --reporter=default --coverage
 
 - name: Upload coverage
-  uses: codecov/codecov-action@v4
+  uses: codecov/codecov-action@v5
   with:
     files: ./coverage/lcov.info
 ```
@@ -1583,7 +1495,7 @@ tests/
     uv run pytest --junitxml=junit.xml --cov-report=xml
 
 - name: Upload coverage
-  uses: codecov/codecov-action@v4
+  uses: codecov/codecov-action@v5
   with:
     files: ./coverage.xml
 ```
@@ -1599,7 +1511,7 @@ tests/
   run: cargo nextest run --profile ci --no-fail-fast
 
 - name: Upload test results
-  uses: actions/upload-artifact@v4
+  uses: actions/upload-artifact@v7
   with:
     name: test-results
     path: target/nextest/ci/junit.xml
@@ -1710,7 +1622,7 @@ Execute this pre-commit compliance check:
 
 ### Step 4: Analyze compliance
 
-Compare existing configuration against project standards (from `pre-commit-standards` skill):
+Compare existing configuration against the project standards in :
 
 **Required Base Hooks (All Projects):**
 - `pre-commit-hooks` v5.0.0+ with: trailing-whitespace, end-of-file-fixer, check-yaml, check-json, check-merge-conflict, check-added-large-files
@@ -1783,6 +1695,266 @@ components:
 - **Unknown hook repos**: Skip (do not remove custom hooks)
 - **Permission errors**: Report and suggest manual fix
 
+
+# configure-pre-commit Reference
+
+Canonical hook list, pinned versions, per-project-type configurations, and
+compliance conventions. (Absorbed the former `pre-commit-standards`
+reference skill.)
+
+
+## Version: 2025.1
+
+Standard pre-commit configuration for repository compliance.
+
+
+## Standard Versions (2025.1)
+
+| Hook | Version | Purpose |
+|------|---------|---------|
+| pre-commit-hooks | v6.0.0 | Core hooks (trailing-whitespace, check-yaml, etc.) |
+| conventional-pre-commit | v4.4.0 | Conventional commit message validation |
+| biome | v2.4.16 | Code formatting and linting (JS, TS, JSON) |
+| gruntwork pre-commit | v0.1.30 | helmlint, tflint (infrastructure only) |
+| actionlint | v1.7.12 | GitHub Actions validation (infrastructure only) |
+| helm-docs | v1.14.2 | Helm documentation (infrastructure only) |
+| gitleaks | v8.30.1 | Secret scanning (recommended) |
+
+
+## Project Type Configurations
+
+
+### Frontend App (Vue/React)
+
+Required hooks for frontend applications:
+
+```yaml
+default_install_hook_types:
+  - pre-commit
+  - commit-msg
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+        exclude: ^(helm/templates/|skaffold/|k8s/).*\.ya?ml$
+      - id: check-json
+        exclude: tsconfig\.json$
+      - id: check-added-large-files
+        args: ['--maxkb=1000']
+      - id: check-merge-conflict
+      - id: detect-private-key
+
+  - repo: https://github.com/compilerla/conventional-pre-commit
+    rev: v4.4.0
+    hooks:
+      - id: conventional-pre-commit
+        stages: [commit-msg]
+
+  - repo: https://github.com/biomejs/pre-commit
+    rev: v2.4.16
+    hooks:
+      - id: biome-check
+        additional_dependencies: ["@biomejs/biome@2.4.16"]
+
+  # Optional: If project has Helm charts
+  - repo: https://github.com/gruntwork-io/pre-commit
+    rev: v0.1.30
+    hooks:
+      - id: helmlint
+        files: ^helm/
+```
+
+
+### Infrastructure Repository
+
+Required hooks for infrastructure (Terraform, Helm, ArgoCD):
+
+```yaml
+default_install_hook_types:
+  - pre-commit
+  - commit-msg
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+        args: [--allow-multiple-documents]
+        exclude: argocd/.*templates/|helm/[^/]+/templates/
+      - id: check-json
+      - id: check-merge-conflict
+      - id: check-symlinks
+      - id: check-toml
+      - id: check-added-large-files
+
+  - repo: https://github.com/compilerla/conventional-pre-commit
+    rev: v4.4.0
+    hooks:
+      - id: conventional-pre-commit
+        stages: [commit-msg]
+
+  - repo: https://github.com/gruntwork-io/pre-commit
+    rev: v0.1.30
+    hooks:
+      - id: tflint
+      - id: helmlint
+
+  - repo: https://github.com/rhysd/actionlint
+    rev: v1.7.12
+    hooks:
+      - id: actionlint
+
+  - repo: https://github.com/norwoodj/helm-docs
+    rev: v1.14.2
+    hooks:
+      - id: helm-docs
+        args:
+          - --chart-search-root=helm
+
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks
+```
+
+
+### Python Service
+
+Required hooks for Python projects:
+
+```yaml
+default_install_hook_types:
+  - pre-commit
+  - commit-msg
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-json
+      - id: check-toml
+      - id: check-added-large-files
+      - id: check-merge-conflict
+      - id: detect-private-key
+
+  - repo: https://github.com/compilerla/conventional-pre-commit
+    rev: v4.4.0
+    hooks:
+      - id: conventional-pre-commit
+        stages: [commit-msg]
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.15
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks
+```
+
+
+## Compliance Checking
+
+
+### Required Base Hooks (All Projects)
+
+Every repository MUST have these hooks:
+
+1. **pre-commit-hooks** (v6.0.0+)
+   - `trailing-whitespace`
+   - `end-of-file-fixer`
+   - `check-yaml`
+   - `check-json`
+   - `check-merge-conflict`
+   - `check-added-large-files`
+
+2. **conventional-pre-commit** (v4.4.0+)
+   - `conventional-pre-commit` in `commit-msg` stage
+
+
+### Status Levels
+
+| Status | Meaning |
+|--------|---------|
+| PASS | Hook present with compliant version |
+| WARN | Hook present but version outdated |
+| FAIL | Required hook missing |
+| SKIP | Hook not applicable for project type |
+
+
+### Version Comparison
+
+When checking versions:
+- Exact match or newer: PASS
+- Older by patch version: WARN (functional but should update)
+- Missing entirely: FAIL (must add)
+
+
+## Exclusion Patterns
+
+
+### Frontend Apps
+
+Exclude Kubernetes/Helm templates from YAML/prettier checks:
+
+```yaml
+exclude: ^(helm/templates/|skaffold/|k8s/).*\.ya?ml$
+```
+
+
+### Infrastructure
+
+Exclude ArgoCD and Helm templates:
+
+```yaml
+exclude: argocd/.*templates/|helm/[^/]+/templates/
+```
+
+
+### Python
+
+No special exclusions needed for standard Python projects.
+
+
+## Installation
+
+After configuring `.pre-commit-config.yaml`:
+
+```bash
+pre-commit install
+pre-commit install --hook-type commit-msg
+```
+
+Or simply:
+
+```bash
+pre-commit install --install-hooks
+```
+
+
+## Updating
+
+To update all hooks to latest versions:
+
+```bash
+pre-commit autoupdate
+```
+
+Then verify versions match project standards.
+
 ---
 
 ## configure-workflows
@@ -1835,8 +2007,8 @@ Determine required workflows based on project type:
 
 | Check | Standard | Severity |
 |-------|----------|----------|
-| checkout action | v4 | WARN if older |
-| build-push action | v6 | WARN if older |
+| checkout action | v6 | WARN if older |
+| build-push action | v7 | WARN if older |
 | Multi-platform | amd64 + arm64 | WARN if missing |
 | Registry | GHCR (ghcr.io) | INFO |
 | Caching | GHA cache enabled | WARN if missing |
@@ -1934,8 +2106,8 @@ Workflow Status:
   test.yml              [PASS | MISSING]
 
 container-build.yml Checks:
-  checkout              v4              [PASS | OUTDATED]
-  build-push-action     v6              [PASS | OUTDATED]
+  checkout              v6              [PASS | OUTDATED]
+  build-push-action     v7              [PASS | OUTDATED]
   Multi-platform        amd64,arm64     [PASS | MISSING]
   Caching               GHA cache       [PASS | MISSING]
   Permissions           Explicit        [PASS | MISSING]
@@ -1977,11 +2149,11 @@ jobs:
       id-token: write  # Required for provenance/SBOM attestations
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
 
-      - uses: docker/login-action@v3
+      - uses: docker/login-action@v4
         if: github.event_name != 'pull_request'
         with:
           registry: ${{ env.REGISTRY }}
@@ -1989,7 +2161,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
@@ -2005,7 +2177,7 @@ jobs:
             type=match,pattern=.*-v(\d+),group=1
 
       - id: build-push
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           platforms: linux/amd64,linux/arm64
@@ -2055,7 +2227,7 @@ For persisting BuildKit `--mount=type=cache` mounts across CI runs:
 ```yaml
 - name: Cache BuildKit mounts
   id: cache
-  uses: actions/cache@v4
+  uses: actions/cache@v5
   with:
     path: buildkit-cache
     key: ${{ runner.os }}-buildkit-${{ hashFiles('package.json', 'bun.lock') }}
@@ -2063,7 +2235,7 @@ For persisting BuildKit `--mount=type=cache` mounts across CI runs:
       ${{ runner.os }}-buildkit-
 
 - name: Inject BuildKit cache mounts
-  uses: reproducible-containers/buildkit-cache-dance@v3
+  uses: reproducible-containers/buildkit-cache-dance@v3.3.0
   with:
     cache-map: |
       {
@@ -2091,9 +2263,9 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: '22'
           cache: 'npm'
@@ -2191,7 +2363,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event.workflow_run.head_branch || github.ref }}
           fetch-depth: 0
@@ -2204,7 +2376,7 @@ jobs:
       # - Code generation or build prerequisites
       #
       # Examples:
-      #   - uses: actions/setup-node@v4
+      #   - uses: actions/setup-node@v6
       #     with:
       #       node-version: '22'
       #   - run: npm ci
@@ -2371,7 +2543,7 @@ jobs:
             - Use the project conventions from CLAUDE.md
 
           claude_args: |
-            --model claude-sonnet-4-20250514
+            --model claude-sonnet-4-6
             --allowedTools "Edit,MultiEdit,Write,Read,Glob,Grep,Bash(npm:*),Bash(npx:*),Bash(yarn:*),Bash(pnpm:*),Bash(bun:*),Bash(bunx:*),Bash(pip:*),Bash(python:*),Bash(cargo:*),Bash(go:*),Bash(make:*),Bash(just:*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git branch:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(git switch:*),Bash(git checkout -b:*),Bash(gh issue create:*),Bash(gh issue list:*),Bash(gh issue comment:*),Bash(gh pr create:*),Bash(gh pr list:*),Bash(gh pr comment:*),Bash(gh pr view:*),Bash(gh run view:*),Bash(gh run list:*),Bash(ls:*),Bash(find:*),Bash(grep:*),Bash(cat:*)"
             --max-turns 50
 ```
@@ -2926,7 +3098,13 @@ Determine appropriate release-type from detected package files:
 
 **Workflow file checks**:
 - Action version: `googleapis/release-please-action@v4`
-- Token: Uses `MY_RELEASE_PLEASE_TOKEN` secret (not GITHUB_TOKEN)
+- Token: Uses a non-`GITHUB_TOKEN` release token. Accept **either** pattern:
+  - **GitHub App token (preferred)** — `actions/create-github-app-token` mints
+    a token from `app-id: ${{ vars.RELEASE_PLEASE_APP_ID }}` /
+    `private-key: ${{ secrets.RELEASE_PLEASE_PRIVATE_KEY }}`, passed as
+    `token: ${{ steps.app-token.outputs.token }}`. Treat this as compliant —
+    do **not** flag it to switch to `MY_RELEASE_PLEASE_TOKEN`.
+  - **PAT (legacy)** — `token: ${{ secrets.MY_RELEASE_PLEASE_TOKEN }}`.
 - Trigger: Push to `main` branch
 - Permissions: `contents: write`, `pull-requests: write`
 
@@ -2953,9 +3131,11 @@ For the report format, see .
 2. **Missing config**: Create with detected release-type
 3. **Missing manifest**: Create with initial version `0.0.0`
 4. **Outdated action**: Update to v4
-5. **Wrong token**: Update to use MY_RELEASE_PLEASE_TOKEN
+5. **Wrong token**: Use the GitHub App-token pattern (preferred) or
+   `MY_RELEASE_PLEASE_TOKEN` — never `GITHUB_TOKEN`. A workflow already on
+   `create-github-app-token` is compliant; leave it as-is.
 
-For standard templates, see .
+For both token templates (App-token preferred, PAT legacy), see .
 
 
 ### Step 6: Update standards tracking
@@ -2970,13 +3150,27 @@ components:
 
 ## Important Notes
 
-- Requires `MY_RELEASE_PLEASE_TOKEN` secret in repository settings
+- **Release token (not `GITHUB_TOKEN`)** — a release PR needs a token that can
+  trigger other workflows. Two patterns, App-token preferred:
+  - **GitHub App token (preferred)** — `actions/create-github-app-token` reads
+    `RELEASE_PLEASE_APP_ID` (a repo/org **variable**) and
+    `RELEASE_PLEASE_PRIVATE_KEY` (a **secret**). For the laurigates org these
+    credentials are pushed by gitops to repos flagged `release_please = true`,
+    so this is the standard that matches every other repo.
+  - **`MY_RELEASE_PLEASE_TOKEN` PAT (legacy)** — a personal-access-token secret
+    in repository settings. Still valid, but diverges from the org standard.
 - CHANGELOG.md is managed by release-please - never edit manually
 - Version fields in package.json/pyproject.toml are managed automatically
 - Works with `conventional-pre-commit` hook for commit validation
 
 
 # configure-release-please Reference
+
+Standard release-please configuration (v2025.1) for automated semantic
+versioning and changelog generation. (Absorbed the former
+`release-please-standards` reference skill; the **monorepo** strategy —
+component tags, per-package `extra-files`, tag migration — lives in
+`git-plugin:release-please-configuration`.)
 
 
 ## Compliance Report Format
@@ -2992,8 +3186,8 @@ File Status:
   Manifest        .release-please-manifest.json         [PASS | MISSING]
 
 Configuration Checks:
-  Action version  v4                                    [PASS | OUTDATED]
-  Token           MY_RELEASE_PLEASE_TOKEN               [PASS | WRONG TOKEN]
+  Action version  v5                                    [PASS | OUTDATED]
+  Token           App token / MY_RELEASE_PLEASE_TOKEN    [PASS | WRONG TOKEN]
   Release type    node                                  [PASS | WRONG TYPE]
   Changelog       feat, fix sections                    [PASS | INCOMPLETE]
   Plugin          node-workspace                        [PASS | MISSING]
@@ -3005,7 +3199,12 @@ Overall: Fully compliant | X issues found
 ## Standard Templates
 
 
-### Workflow Template
+### Workflow Template — GitHub App token (preferred)
+
+This is the laurigates org standard. `create-github-app-token` mints a
+short-lived token from the `laurigates-release-please` GitHub App;
+`RELEASE_PLEASE_APP_ID` (variable) and `RELEASE_PLEASE_PRIVATE_KEY` (secret)
+are provisioned by gitops on repos flagged `release_please = true`.
 
 ```yaml
 name: Release Please
@@ -3023,7 +3222,39 @@ jobs:
   release-please:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/create-github-app-token@v3
+        id: app-token
+        with:
+          app-id: ${{ vars.RELEASE_PLEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_PLEASE_PRIVATE_KEY }}
       - uses: googleapis/release-please-action@v4
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+```
+
+
+### Workflow Template — PAT (legacy)
+
+Still valid where the GitHub App isn't set up, but diverges from the org
+standard and won't consume the gitops-provisioned App credentials.
+
+```yaml
+name: Release Please
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: googleapis/release-please-action@v5
         with:
           token: ${{ secrets.MY_RELEASE_PLEASE_TOKEN }}
 ```
@@ -3056,6 +3287,84 @@ jobs:
   ".": "0.0.0"
 }
 ```
+
+Version `0.0.0` is a placeholder — release-please updates it automatically.
+
+
+## Project Type Variations
+
+| Project type | release-type | Updates |
+|--------------|--------------|---------|
+| Node.js frontend/backend | `node` (+ `node-workspace` plugin) | `package.json` version field |
+| Python service | `python` | `pyproject.toml` version field, `__version__` in code |
+| Infrastructure (Helm) | `helm` | `Chart.yaml` version field |
+| Multi-package repo | per-package `component` + root `include-component-in-tag: true` | See `git-plugin:release-please-configuration` for the full monorepo strategy |
+
+
+## Token Configuration
+
+The workflow uses a dedicated release token (not `GITHUB_TOKEN`) so release
+PRs can trigger other workflows, CI runs on release PRs, and the audit trail
+stays clean. Two accepted patterns:
+
+| Pattern | How | When |
+|---------|-----|------|
+| **GitHub App token (preferred)** | `actions/create-github-app-token` → `app-id: ${{ vars.RELEASE_PLEASE_APP_ID }}`, `private-key: ${{ secrets.RELEASE_PLEASE_PRIVATE_KEY }}`, passed as `token: ${{ steps.app-token.outputs.token }}` | laurigates org standard — credentials are gitops-provisioned on `release_please = true` repos |
+| **PAT (legacy)** | `token: ${{ secrets.MY_RELEASE_PLEASE_TOKEN }}` | Where the GitHub App isn't set up |
+
+A workflow already using the App-token pattern is compliant — do not flag it
+to switch to `MY_RELEASE_PLEASE_TOKEN`.
+
+
+## Validation Rules
+
+| Status | Condition |
+|--------|-----------|
+| PASS | All three files present with valid configuration |
+| WARN | Files present but using a deprecated action version (older than v5) |
+| FAIL | Missing required files or invalid configuration |
+
+1. **Workflow**: action version v5 (warn if older); token from a secret,
+   never hardcoded; triggers on `push` to `main`
+2. **Config**: valid release-type (`node`, `python`, `helm`, `simple`);
+   changelog-sections include at least `feat` and `fix`
+3. **Manifest**: valid JSON; packages match the config
+
+
+## Protected Files
+
+Release-please manages these automatically — never edit them manually:
+`CHANGELOG.md`, version fields in `package.json` / `pyproject.toml` /
+`Chart.yaml`, and `.release-please-manifest.json` (initial setup only). See
+`git-plugin:release-please-protection` for enforcement.
+
+
+## Conventional Commits
+
+| Prefix | Release Type | Example |
+|--------|--------------|---------|
+| `feat:` | Minor | `feat: add user authentication` |
+| `fix:` | Patch | `fix: correct login timeout` |
+| `feat!:` | Major | `feat!: redesign API` |
+| `BREAKING CHANGE:` | Major | In commit body |
+
+
+## Installation Steps
+
+1. Create workflow, config, and manifest files (templates above)
+2. Provide the release token — preferred: `RELEASE_PLEASE_APP_ID` variable +
+   `RELEASE_PLEASE_PRIVATE_KEY` secret (gitops provisions these on
+   `release_please = true` repos); legacy: `MY_RELEASE_PLEASE_TOKEN` secret
+3. Ensure pre-commit has the conventional-pre-commit hook
+
+
+## Troubleshooting
+
+| Symptom | Check |
+|---------|-------|
+| Release PR not created | Conventional commit format; workflow permissions; token has write access |
+| Version not updated | Manifest is valid JSON; release-type matches project; release-please logs in Actions |
+| CI not running on release PR | Token must be a dedicated release token (App token or PAT), not `GITHUB_TOKEN` |
 
 ---
 
@@ -3098,8 +3407,8 @@ Check the Dockerfile against these standards:
 
 | Check | Standard | Severity |
 |-------|----------|----------|
-| Build base | `node:22-alpine` (LTS) | WARN if other |
-| Runtime base | `nginx:1.27-alpine` | WARN if other |
+| Build base | `node:24-alpine` (LTS) | WARN if other |
+| Runtime base | `nginx:1.30-alpine` | WARN if other |
 | Multi-stage | Required | FAIL if missing |
 | HEALTHCHECK | Required | FAIL if missing |
 | Non-root user | Required | FAIL if missing |
@@ -3110,7 +3419,7 @@ Check the Dockerfile against these standards:
 
 | Check | Standard | Severity |
 |-------|----------|----------|
-| Base image | `python:3.12-slim` | WARN if other |
+| Base image | `python:3.14-slim` | WARN if other |
 | Multi-stage | Required for production | FAIL if missing |
 | HEALTHCHECK | Required | FAIL if missing |
 | Non-root user | Required | FAIL if missing |
@@ -3184,7 +3493,7 @@ components:
 ### Frontend (Node/Vite/nginx)
 
 ```dockerfile
-FROM node:22-alpine AS build
+FROM node:24-alpine AS build
 
 ARG SENTRY_AUTH_TOKEN
 ARG VITE_SENTRY_DSN
@@ -3199,7 +3508,7 @@ RUN --mount=type=cache,target=/root/.npm \
     --mount=type=cache,target=/app/node_modules/.vite \
     npm run build
 
-FROM nginx:1.27-alpine
+FROM nginx:1.30-alpine
 
 
 # OCI labels for GHCR integration
@@ -3230,13 +3539,13 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
 ### Python Service
 
 ```dockerfile
-FROM python:3.12-slim AS builder
+FROM python:3.14-slim AS builder
 
 WORKDIR /app
 COPY pyproject.toml uv.lock ./
 RUN pip install uv && uv sync --frozen --no-dev
 
-FROM python:3.12-slim
+FROM python:3.14-slim
 
 
 # OCI labels for GHCR integration
@@ -3271,8 +3580,8 @@ CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
 
 ## Notes
 
-- Node 22 is current LTS (recommended over 24)
-- nginx:1.27-alpine preferred over debian variant
+- Node 24 is current Active LTS (Node 22 in maintenance)
+- nginx:1.30-alpine preferred over debian variant
 - HEALTHCHECK is critical for Kubernetes liveness probes
 - Build caching significantly improves CI/CD speed
 - Non-root user is mandatory for production containers
@@ -3975,7 +4284,7 @@ Sentry.init({
 
 ```yaml
 - name: Create Sentry Release
-  uses: getsentry/action-release@v1
+  uses: getsentry/action-release@v3
   env:
     SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
     SENTRY_ORG: your-org
