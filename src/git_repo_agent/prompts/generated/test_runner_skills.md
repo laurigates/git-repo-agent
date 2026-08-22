@@ -303,7 +303,7 @@ Analyzes test results from any testing framework, uses Zen planner to create a s
    - Identify patterns and root causes
 
 2. **Plan Fixes with PAL Planner**
-   - Use `mcp__pal__planner` for systematic planning
+   - Use `mcp__pal-mcp-server__planner` for systematic planning
    - Break down complex fixes into actionable steps
    - Identify dependencies between fixes
    - Estimate effort and priority
@@ -360,7 +360,7 @@ fixes *how* the work is split.
 
 Two consequences worth stating inline:
 
-- **The harness surrenders `mcp__pal__planner`.** A workflow script cannot reach MCP
+- **The harness surrenders `mcp__pal-mcp-server__planner`.** A workflow script cannot reach MCP
   tools, so the dependency edges in the merged plan are *inferred by the group agents*,
   not planned. A run that genuinely needs PAL planning (Step 2 below) should stay inline.
 - **`context: fork` stays, and it is not what justifies the harness.** The pin lives in
@@ -440,7 +440,7 @@ Read the test result files from `<results-path>` and extract:
 
 **Step 2: Use PAL Planner**
 
-Call `mcp__pal__planner` with model "gemini-2.5-pro" to create a systematic fix plan:
+Call `mcp__pal-mcp-server__planner` with model "gemini-2.5-pro" to create a systematic fix plan:
 - Step 1: Summarize findings and identify root causes
 - Step 2: Prioritize issues (impact × effort matrix)
 - Step 3: Break down fixes into actionable tasks
