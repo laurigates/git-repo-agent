@@ -549,6 +549,22 @@ report formatter detection (`BIOME`, `PRETTIER`, `RUFF_FORMAT`, `BLACK`,
 (a modern formatter is set up), `migrate` (a legacy formatter wants migration to
 Biome/Ruff), or `setup` (no formatter detected).
 
+**How `CI_FORMAT` is decided.** The probe scans `.github/workflows/*.yml|yaml`
+for a command that runs the formatter, then resolves **one** level of
+package-script indirection:
+
+| Signal | `CI_FORMAT` | Why |
+|--------|-------------|-----|
+| Workflow runs `biome check` / `biome ci` | `true` | In Biome 2.x `check` is the combined command (formatter + linter + import sorting); `ci` is its CI-oriented variant |
+| Workflow runs `biome format`, `ruff format`, `cargo fmt`, `prettier` | `true` | Format-only commands, named directly |
+| Workflow runs `biome lint` | `false` | Lint-only — it does not format |
+| Workflow runs `bun run <s>` / `npm run <s>` / `pnpm run <s>` / `yarn <s>` and `package.json`'s `scripts.<s>` contains any command above | `true` | The idiomatic setup keeps the real command in `package.json` |
+| That script calls *another* script (depth 2+) | `false` | Exactly one level is resolved; deeper chains are out of scope |
+
+Indirection needs `jq` and a readable `package.json`. When `package.json` is
+absent, unparseable, or has no `scripts` key — or `jq` is unavailable — the
+lookup degrades silently to the direct-command scan (no stderr, exit 0).
+
 **Modern formatting preferences:**
 - **JavaScript/TypeScript**: Biome (replaces Prettier + ESLint). On `RECOMMENDATION=migrate` with Prettier present, offer migration to Biome — do not configure Prettier as the target formatter.
 - **Python**: Ruff format (replaces Black)
@@ -2533,17 +2549,19 @@ jobs:
 
             If PR failure, comment on PR #${{ steps.context.outputs.pr_number }} with issue link.
 
-            ### Important Rules
+            ### Constraints (this run is unattended — nobody can answer a question, so act on these rather than asking)
 
-            - Do NOT force push or rewrite history
-            - Do NOT modify workflow files (.github/workflows/)
-            - Do NOT add new dependencies without strong justification
-            - Do NOT make unrelated changes
-            - If in doubt, prefer opening an issue
-            - Use the project conventions from CLAUDE.md
+            - No force-push or history rewrite: the branch may already be checked out by a reviewer, and a rewrite destroys their view of what failed.
+            - Leave `.github/workflows/` alone: the token this job runs with cannot push workflow-file changes, and those files need a human change anyway.
+            - No new dependencies unless the failure is literally a missing one: a dependency added by a bot lands unreviewed in the lockfile.
+            - Fix only what the failing job reported. Note any unrelated bug you notice in the PR body as a follow-up instead of changing it.
+            - Follow the project conventions in CLAUDE.md.
+            - When you are unsure the fix is right, open the issue (Step 3B) and stop.
 
+          # opus is an alias for the current Opus generation; set --effort explicitly — it is the cost lever and the harness default is high.
           claude_args: |
-            --model claude-sonnet-4-6
+            --model opus
+            --effort medium
             --allowedTools "Edit,MultiEdit,Write,Read,Glob,Grep,Bash(npm:*),Bash(npx:*),Bash(yarn:*),Bash(pnpm:*),Bash(bun:*),Bash(bunx:*),Bash(pip:*),Bash(python:*),Bash(cargo:*),Bash(go:*),Bash(make:*),Bash(just:*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git branch:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(git switch:*),Bash(git checkout -b:*),Bash(gh issue create:*),Bash(gh issue list:*),Bash(gh issue comment:*),Bash(gh pr create:*),Bash(gh pr list:*),Bash(gh pr comment:*),Bash(gh pr view:*),Bash(gh run view:*),Bash(gh run list:*),Bash(ls:*),Bash(find:*),Bash(grep:*),Bash(cat:*)"
             --max-turns 50
 ```
