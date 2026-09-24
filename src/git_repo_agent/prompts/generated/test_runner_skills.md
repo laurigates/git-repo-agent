@@ -4,7 +4,7 @@
 
 **Delegate this task to the `test-runner` agent.**
 
-Use the Agent tool with `subagent_type: test-runner` to run tests with the appropriate framework. Pass all the context gathered above and the parsed parameters to the agent.
+Use the Agent tool with `subagent_type: testing-plugin:test-runner` to run tests with the appropriate framework. Pass all the context gathered above and the parsed parameters to the agent.
 
 The test-runner agent should:
 
@@ -303,7 +303,7 @@ Analyzes test results from any testing framework, uses Zen planner to create a s
    - Identify patterns and root causes
 
 2. **Plan Fixes with PAL Planner**
-   - Use `mcp__pal__planner` for systematic planning
+   - Use `mcp__pal-mcp-server__planner` for systematic planning
    - Break down complex fixes into actionable steps
    - Identify dependencies between fixes
    - Estimate effort and priority
@@ -360,12 +360,13 @@ fixes *how* the work is split.
 
 Two consequences worth stating inline:
 
-- **The harness surrenders `mcp__pal__planner`.** A workflow script cannot reach MCP
+- **The harness surrenders `mcp__pal-mcp-server__planner`.** A workflow script cannot reach MCP
   tools, so the dependency edges in the merged plan are *inferred by the group agents*,
   not planned. A run that genuinely needs PAL planning (Step 2 below) should stay inline.
 - **`context: fork` stays, and it is not what justifies the harness.** The pin lives in
-  `scripts/plugin-compliance-check.sh` (the `context: fork` guard list, currently around
-  lines 898–914) and is unchanged by this template. Per
+  `scripts/plugin-compliance-check.sh` (the `for fork_skill in` loop inside
+  `check_skill_body()` — cited by name, because a line number in that file drifts every
+  time a regression guard is inserted) and is unchanged by this template. Per
   `.claude/rules/workflow-vs-skill.md` § "The `context: fork` corollary", fork already
   bought context isolation for free — so this harness has to earn its tokens by
   **splitting** the planning work across agent types behind a real barrier, which it does.
@@ -440,7 +441,7 @@ Read the test result files from `<results-path>` and extract:
 
 **Step 2: Use PAL Planner**
 
-Call `mcp__pal__planner` with model "gemini-2.5-pro" to create a systematic fix plan:
+Call `mcp__pal-mcp-server__planner` with model "gemini-2.5-pro" to create a systematic fix plan:
 - Step 1: Summarize findings and identify root causes
 - Step 2: Prioritize issues (impact × effort matrix)
 - Step 3: Break down fixes into actionable tasks
@@ -486,7 +487,9 @@ do not invent a focus.
 3. Refactor for quality
 4. Re-run tests to confirm
 
-Do you want me to proceed with the analysis and planning, or would you like to review the plan first?
+Proceed with the analysis and planning now — this skill runs `context: fork`
+and cannot wait for a reply. Present the completed Step 5 summary as the
+deliverable; the caller reviews the plan after the fact, not before it.
 
 ---
 
