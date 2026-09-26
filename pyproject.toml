@@ -47,5 +47,5 @@ dev = [
     # Pinned: formatting output is version-sensitive, so an unpinned floor lets a
     # newer ruff reformat code CI has already accepted. laurigates/claude-plugins
     # pins the same version on its pre-commit and CI surfaces.
-    "ruff==0.15.8",
+    "ruff==0.16.8",
 ]
