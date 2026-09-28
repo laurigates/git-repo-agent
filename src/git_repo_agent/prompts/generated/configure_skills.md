@@ -549,6 +549,22 @@ report formatter detection (`BIOME`, `PRETTIER`, `RUFF_FORMAT`, `BLACK`,
 (a modern formatter is set up), `migrate` (a legacy formatter wants migration to
 Biome/Ruff), or `setup` (no formatter detected).
 
+**How `CI_FORMAT` is decided.** The probe scans `.github/workflows/*.yml|yaml`
+for a command that runs the formatter, then resolves **one** level of
+package-script indirection:
+
+| Signal | `CI_FORMAT` | Why |
+|--------|-------------|-----|
+| Workflow runs `biome check` / `biome ci` | `true` | In Biome 2.x `check` is the combined command (formatter + linter + import sorting); `ci` is its CI-oriented variant |
+| Workflow runs `biome format`, `ruff format`, `cargo fmt`, `prettier` | `true` | Format-only commands, named directly |
+| Workflow runs `biome lint` | `false` | Lint-only — it does not format |
+| Workflow runs `bun run <s>` / `npm run <s>` / `pnpm run <s>` / `yarn <s>` and `package.json`'s `scripts.<s>` contains any command above | `true` | The idiomatic setup keeps the real command in `package.json` |
+| That script calls *another* script (depth 2+) | `false` | Exactly one level is resolved; deeper chains are out of scope |
+
+Indirection needs `jq` and a readable `package.json`. When `package.json` is
+absent, unparseable, or has no `scripts` key — or `jq` is unavailable — the
+lookup degrades silently to the direct-command scan (no stderr, exit 0).
+
 **Modern formatting preferences:**
 - **JavaScript/TypeScript**: Biome (replaces Prettier + ESLint). On `RECOMMENDATION=migrate` with Prettier present, offer migration to Biome — do not configure Prettier as the target formatter.
 - **Python**: Ruff format (replaces Black)
@@ -2533,17 +2549,19 @@ jobs:
 
             If PR failure, comment on PR #${{ steps.context.outputs.pr_number }} with issue link.
 
-            ### Important Rules
+            ### Constraints (this run is unattended — nobody can answer a question, so act on these rather than asking)
 
-            - Do NOT force push or rewrite history
-            - Do NOT modify workflow files (.github/workflows/)
-            - Do NOT add new dependencies without strong justification
-            - Do NOT make unrelated changes
-            - If in doubt, prefer opening an issue
-            - Use the project conventions from CLAUDE.md
+            - No force-push or history rewrite: the branch may already be checked out by a reviewer, and a rewrite destroys their view of what failed.
+            - Leave `.github/workflows/` alone: the token this job runs with cannot push workflow-file changes, and those files need a human change anyway.
+            - No new dependencies unless the failure is literally a missing one: a dependency added by a bot lands unreviewed in the lockfile.
+            - Fix only what the failing job reported. Note any unrelated bug you notice in the PR body as a follow-up instead of changing it.
+            - Follow the project conventions in CLAUDE.md.
+            - When you are unsure the fix is right, open the issue (Step 3B) and stop.
 
+          # opus is an alias for the current Opus generation; set --effort explicitly — it is the cost lever and the harness default is high.
           claude_args: |
-            --model claude-sonnet-4-6
+            --model opus
+            --effort medium
             --allowedTools "Edit,MultiEdit,Write,Read,Glob,Grep,Bash(npm:*),Bash(npx:*),Bash(yarn:*),Bash(pnpm:*),Bash(bun:*),Bash(bunx:*),Bash(pip:*),Bash(python:*),Bash(cargo:*),Bash(go:*),Bash(make:*),Bash(just:*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git branch:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(git switch:*),Bash(git checkout -b:*),Bash(gh issue create:*),Bash(gh issue list:*),Bash(gh issue comment:*),Bash(gh pr create:*),Bash(gh pr list:*),Bash(gh pr comment:*),Bash(gh pr view:*),Bash(gh run view:*),Bash(gh run list:*),Bash(ls:*),Bash(find:*),Bash(grep:*),Bash(cat:*)"
             --max-turns 50
 ```
@@ -2740,6 +2758,7 @@ export default defineConfig({
         statements: 80,
       },
 
+      // Load-bearing: pins the denominator to source files (see below)
       include: ['src/**/*.{js,ts,jsx,tsx}'],
 
       exclude: [
@@ -2755,12 +2774,15 @@ export default defineConfig({
       ],
 
       clean: true,
-      all: true,
       skipFull: false,
     },
   },
 });
 ```
+
+**Vitest 4 removed `coverage.all`** (and `coverage.extensions`). It now reports only the files the tests loaded, unless `coverage.include` is set. An `all: true` left in a v4 config is silently ignored, so the config looks correct while the denominator stays unpinned. Use `include` in its place.
+
+Without `include`, the denominator is the test suite's import graph, not the codebase. A PR that adds *only tests* can then lower the measured figure and fail its own threshold. The first test that imports a module with many untested siblings pulls them in at near-zero coverage (observed: 61.8% → 42.0% against 60% thresholds, with no regression). Treat thresholds as a ratchet. A change of basis, such as adding `include`, goes in its own commit that states the old and new figures.
 
 
 ### Package.json Scripts
@@ -3291,6 +3313,38 @@ jobs:
 Version `0.0.0` is a placeholder — release-please updates it automatically.
 
 
+### Immutable Releases: Draft, Attach, Publish
+
+With GitHub [immutable releases](https://docs.github.com/en/code-security/concepts/supply-chain-security/immutable-releases)
+enabled, assets cannot be added to a release after it is published. An upload
+step triggered by `release: published` therefore fails, and anything after it
+in the job, such as a store or registry publish, is skipped. Follow GitHub's
+recommended order instead: create a draft, attach the assets, then publish.
+
+```json
+{
+  "packages": { ".": { "release-type": "node" } },
+  "draft": true,
+  "force-tag-creation": true
+}
+```
+
+- `force-tag-creation` is required with `draft`. GitHub creates no tag for a
+  draft until it is published, so without it release-please cannot find the
+  previous release on its next run.
+- Gate an asset job in the release-please workflow on
+  `release_created == 'true'`. It builds from `tag_name`, uploads to the draft,
+  runs any external publish, and finally publishes the draft
+  (`gh release edit <tag> --draft=false`).
+- A release that stays in draft means that job did not finish. Retry it with
+  **Re-run failed jobs**. A full re-run recomputes `release_created`, finds
+  nothing new to release, and skips the job. Any re-run replays the workflow
+  file from the original commit, so a fix merged since then does not apply.
+  Rebuild from a new `workflow_dispatch` run instead.
+- To rebuild an already-published release, a `workflow_dispatch` run with a
+  `tag` input can build it, but the assets can only go to a run artifact.
+
+
 ## Project Type Variations
 
 | Project type | release-type | Updates |
@@ -3365,6 +3419,8 @@ Release-please manages these automatically — never edit them manually:
 | Release PR not created | Conventional commit format; workflow permissions; token has write access |
 | Version not updated | Manifest is valid JSON; release-type matches project; release-please logs in Actions |
 | CI not running on release PR | Token must be a dedicated release token (App token or PAT), not `GITHUB_TOKEN` |
+| Asset upload fails on a published release; later publish steps skipped | Immutable releases are on — use `draft: true` + `force-tag-creation` (see Immutable Releases above) |
+| Release stuck in draft | The asset/publish job did not finish — **Re-run failed jobs**, not a full re-run |
 
 ---
 
