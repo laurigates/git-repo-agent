@@ -267,7 +267,7 @@ Overall: [X issues found]
 
 ## README Template (Standard Style)
 
-```markdown
+````markdown
 <div align="center">
 
 <img src="assets/logo.png" alt="PROJECT_NAME Logo" width="128" height="128">
@@ -377,7 +377,7 @@ Contributions are welcome! Please read our [Contributing Guidelines](CONTRIBUTIN
 ## License
 
 This project is licensed under the [LICENSE_TYPE](LICENSE) license.
-```
+````
 
 
 ## Badge URL Patterns
@@ -604,6 +604,8 @@ See [CHANGELOG.md](CHANGELOG.md) for version history.
 ## blueprint-claude-md
 
 Generate or update the project's CLAUDE.md file based on blueprint artifacts, PRDs, and project structure.
+
+Branch-specific detail lives in `references/`, split by the path that needs it — an invocation opens only the file for the branch it takes.
 ## CLAUDE.md vs Auto Memory
 
 Claude Code has two complementary systems for project context. CLAUDE.md should contain **team-shared instructions** — not patterns Claude learns on its own.
@@ -649,223 +651,9 @@ CLAUDE.md files support importing other markdown files to stay lean:
 
 Use `@import` to reference existing documentation rather than duplicating content into CLAUDE.md.
 
-**Steps**:
 
-1. **Check current state**:
-   - Look for existing `CLAUDE.md` in project root
-   - Look for existing `CLAUDE.local.md` (personal preferences, gitignored)
-   - Read `docs/blueprint/manifest.json` for configuration
-   - Check for `~/.claude/rules/` (user-level rules)
-   - Determine `claude_md_mode` (single, modular, or both)
+## CLAUDE.md Best Practices
 
-2. **Determine action** (use report to orchestrator):
-   ```
-   {If CLAUDE.md exists:}
-   question: "CLAUDE.md already exists. What would you like to do?"
-   options:
-     - "Update with latest project info" → merge updates
-     - "Regenerate completely" → overwrite (backup first)
-     - "Add missing sections only" → append new content
-     - "Add @imports for existing docs" → replace inline content with imports
-     - "Convert to modular rules" → split into .claude/rules/
-     - "Create CLAUDE.local.md" → personal preferences (gitignored)
-     - "View current structure" → analyze and display
-
-   {If CLAUDE.md doesn't exist:}
-   question: "No CLAUDE.md found. How would you like to create it?"
-   options:
-     - "Generate from project analysis" → auto-generate
-     - "Generate from PRDs" → use blueprint PRDs
-     - "Generate with @imports (lean)" → auto-generate using imports for existing docs
-     - "Start with template" → use starter template
-     - "Use modular rules instead" → skip CLAUDE.md, use rules/
-   ```
-
-3. **Gather project context**:
-   - **Project structure**: Detect language, framework, build tools
-   - **PRDs**: Read `docs/prds/*.md` for requirements
-   - **Work overview**: Current phase and progress
-   - **Existing rules**: Content from `.claude/rules/` if present
-   - **Git history**: Recent patterns and conventions
-   - **Dependencies**: Package managers, key libraries
-
-4. **Generate CLAUDE.md sections**:
-
-   **Standard sections** (focused on team-shared instructions):
-   ```markdown
-   # Project: {name}
-
-   ## Overview
-   {Brief project description from PRDs or detection}
-
-   ## Tech Stack
-   - Language: {detected}
-   - Framework: {detected}
-   - Build: {detected}
-   - Test: {detected}
-
-   ## Development Workflow
-
-   ### Getting Started
-   {Setup commands}
-
-   ### Running Tests
-   {Test commands}
-
-   ### Building
-   {Build commands}
-
-   ## Architecture
-   {Key architectural decisions from PRDs — or use @import:}
-   @docs/prds/architecture-prd.md
-
-   ## Conventions
-
-   ### Code Style
-   {Detected or from PRDs}
-
-   ### Commit Messages
-   {Conventional commits if detected}
-
-   ### Testing Requirements
-   {From PRDs or rules}
-
-   ## See Also
-   {If modular rules enabled:}
-   - `.claude/rules/` - Detailed rules by domain
-   - `docs/prds/` - Product requirements
-   ```
-
-   **Sections to omit** (auto memory handles these automatically):
-   - "Current Focus" — Claude tracks this in auto memory
-   - "Key Files" — Claude learns file relationships automatically
-   - Debugging tips — Claude records these in auto memory topic files
-
-5. **If modular rules mode = "both"**:
-   - Keep CLAUDE.md as high-level overview
-   - Reference `.claude/rules/` for details:
-     ```markdown
-     ## Detailed Rules
-     See `.claude/rules/` for domain-specific guidelines:
-     - `development.md` - Development workflow
-     - `testing.md` - Testing requirements
-     - `frontend/` - Frontend-specific rules
-     - `backend/` - Backend-specific rules
-     ```
-
-6. **If modular rules mode = "modular"**:
-   - Create minimal CLAUDE.md with `@import` references
-   - Move detailed content to `.claude/rules/`
-   - Example lean CLAUDE.md:
-     ```markdown
-     # Project: {name}
-
-     ## Overview
-     {One-paragraph description}
-
-     @docs/prds/main.md
-
-     ## Development
-     {Build, test, lint commands}
-
-     ## Rules
-     See `.claude/rules/` for detailed guidelines.
-     ```
-
-6b. **If "Create CLAUDE.local.md" selected**:
-   - Create `CLAUDE.local.md` in project root for personal preferences
-   - Add `CLAUDE.local.md` to `.gitignore` if not already present
-   - Template:
-     ```markdown
-     # Personal Preferences
-
-     ## My Environment
-     - IDE: {detected or ask}
-     - Terminal: {detected or ask}
-
-     ## My Workflow Preferences
-     - {Personal conventions not shared with team}
-     ```
-
-6c. **If "Add @imports" selected**:
-   - Scan existing CLAUDE.md for sections with content that exists in other files
-   - Replace duplicated content with `@path/to/source.md` imports
-   - Preserve CLAUDE.md-only content inline
-   - Show diff of changes before applying
-
-7. **Smart update** (for existing CLAUDE.md):
-   - Parse existing sections
-   - Identify outdated content (compare with PRDs, structure)
-   - Offer section-by-section updates:
-     ```
-     question: "Found outdated sections. Which would you like to update?"
-     options: [list of sections]
-     allowMultiSelect: true
-     ```
-
-8. **Sync with modular rules**:
-   - If rules exist in `.claude/rules/`
-   - Detect duplicated content
-   - Offer to deduplicate:
-     ```
-     question: "Found duplicate content between CLAUDE.md and rules/. How to resolve?"
-     options:
-       - "Keep in CLAUDE.md, remove from rules"
-       - "Keep in rules, reference from CLAUDE.md"
-       - "Keep both (may cause confusion)"
-     ```
-
-9. **Update manifest**:
-   - Record CLAUDE.md generation/update
-   - Track which PRDs contributed
-   - Update timestamp
-
-10. **Update task registry**:
-
-    Update the task registry entry in `docs/blueprint/manifest.json`:
-
-    ```bash
-    jq --arg now "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-      '.task_registry["claude-md"].last_completed_at = $now |
-       .task_registry["claude-md"].last_result = "success" |
-       .task_registry["claude-md"].stats.runs_total = ((.task_registry["claude-md"].stats.runs_total // 0) + 1)' \
-      docs/blueprint/manifest.json > tmp.json && mv tmp.json docs/blueprint/manifest.json
-    ```
-
-11. **Report**:
-    ```
-    ✅ CLAUDE.md updated!
-
-    {Created | Updated}: CLAUDE.md
-    {If created:} CLAUDE.local.md (personal preferences, gitignored)
-
-    Sections:
-    - Overview ✅
-    - Tech Stack ✅
-    - Development Workflow ✅
-    - Architecture ✅
-    - Conventions ✅
-
-    @imports used: {count, if any}
-    - @docs/prds/architecture.md
-    - @.claude/rules/testing.md
-
-    Sources used:
-    - PRDs: {list}
-    - Rules: {list}
-    - Project detection: {what was detected}
-
-    {If modular mode:}
-    Note: Detailed rules are in .claude/rules/
-    CLAUDE.md serves as overview and quick reference.
-
-    Note: "Current Focus" and "Key Files" are managed by Claude's
-    auto memory — no need to maintain these in CLAUDE.md.
-
-    Run `/blueprint:status` to see full configuration.
-    ```
-
-**CLAUDE.md Best Practices**:
 - Keep it concise (< 500 lines ideally)
 - Focus on team-shared instructions (standards, commands, architecture)
 - Use `@import` to reference existing docs instead of duplicating content
@@ -874,36 +662,146 @@ Use `@import` to reference existing documentation rather than duplicating conten
 - Let auto memory handle "Current Focus", "Key Files", debugging tips
 - Update when PRDs change significantly
 
-12. **Prompt for next action** (use report to orchestrator):
-    ```
-    question: "CLAUDE.md updated. What would you like to do next?"
-    options:
-      - label: "Check blueprint status (Recommended)"
-        description: "Run /blueprint:status to verify configuration"
-      - label: "Manage modular rules"
-        description: "Add or edit rules in .claude/rules/"
-      - label: "Continue development"
-        description: "Run /project:continue to work on next task"
-      - label: "I'm done for now"
-        description: "Exit - CLAUDE.md is saved"
-    ```
 
-    **Based on selection:**
-    - "Check blueprint status" → Run `/blueprint:status`
-    - "Manage modular rules" → Run `/blueprint:rules`
-    - "Continue development" → Run `/project:continue`
-    - "I'm done" → Exit
+## Execution
 
-**Template Sections** (customize per project type):
+Execute this CLAUDE.md workflow:
 
-| Project Type | Key Sections |
-|--------------|--------------|
-| Python | Virtual env, pytest, type hints |
-| Node.js | Package manager, test runner, build |
-| Rust | Cargo, clippy, unsafe usage rules |
-| Monorepo | Workspace structure, shared deps |
-| API | Endpoints, auth, error handling |
-| Frontend | Components, state, styling |
+
+### Step 1: Check current state
+
+- Look for existing `CLAUDE.md` in project root
+- Look for existing `CLAUDE.local.md` (personal preferences, gitignored)
+- Read `docs/blueprint/manifest.json` for configuration
+- Check for `~/.claude/rules/` (user-level rules)
+- Determine `claude_md_mode` (single, modular, or both)
+
+
+### Step 2: Determine action
+
+Use report to orchestrator:
+
+```
+{If CLAUDE.md exists:}
+question: "CLAUDE.md already exists. What would you like to do?"
+options:
+  - "Update with latest project info" → merge updates
+  - "Regenerate completely" → overwrite (backup first)
+  - "Add missing sections only" → append new content
+  - "Add @imports for existing docs" → replace inline content with imports
+  - "Convert to modular rules" → split into .claude/rules/
+  - "Create CLAUDE.local.md" → personal preferences (gitignored)
+  - "View current structure" → analyze and display
+
+{If CLAUDE.md doesn't exist:}
+question: "No CLAUDE.md found. How would you like to create it?"
+options:
+  - "Generate from project analysis" → auto-generate
+  - "Generate from PRDs" → use blueprint PRDs
+  - "Generate with @imports (lean)" → auto-generate using imports for existing docs
+  - "Start with template" → use starter template
+  - "Use modular rules instead" → skip CLAUDE.md, use rules/
+```
+
+
+### Step 3: Gather project context
+
+- **Project structure**: Detect language, framework, build tools
+- **PRDs**: Read `docs/prds/*.md` for requirements
+- **Work overview**: Current phase and progress
+- **Existing rules**: Content from `.claude/rules/` if present
+- **Git history**: Recent patterns and conventions
+- **Dependencies**: Package managers, key libraries
+
+
+### Step 4: Generate CLAUDE.md sections
+
+Build the sections from [`references/template-sections.md`](references/template-sections.md): the standard skeleton, tailored with the per-project-type additions. Leave out what auto memory handles (see "CLAUDE.md vs Auto Memory" above).
+
+
+### Step 5: Apply the modular rules mode
+
+If modular rules mode is `both` or `modular`, follow the matching section of [`references/modular-rules-split.md`](references/modular-rules-split.md). Mode `single` skips this step.
+
+
+### Step 6: Apply a selected option
+
+- "Create CLAUDE.local.md" → [`references/template-sections.md`](references/template-sections.md) § CLAUDE.local.md template
+- "Add @imports for existing docs" → [`references/smart-update.md`](references/smart-update.md) § Add @imports
+
+
+### Step 7: Smart update (existing CLAUDE.md)
+
+When CLAUDE.md already exists, follow [`references/smart-update.md`](references/smart-update.md) § Smart update.
+
+
+### Step 8: Sync with modular rules
+
+When `.claude/rules/` has rules, follow [`references/modular-rules-split.md`](references/modular-rules-split.md) § Sync with modular rules.
+
+
+### Step 9: Update manifest and task registry
+
+Record the run in `docs/blueprint/manifest.json` per [`references/manifest-and-registry.md`](references/manifest-and-registry.md).
+
+
+### Step 10: Report
+
+```
+✅ CLAUDE.md updated!
+
+{Created | Updated}: CLAUDE.md
+{If created:} CLAUDE.local.md (personal preferences, gitignored)
+
+Sections:
+- Overview ✅
+- Tech Stack ✅
+- Development Workflow ✅
+- Architecture ✅
+- Conventions ✅
+
+@imports used: {count, if any}
+- @docs/prds/architecture.md
+- @.claude/rules/testing.md
+
+Sources used:
+- PRDs: {list}
+- Rules: {list}
+- Project detection: {what was detected}
+
+{If modular mode:}
+Note: Detailed rules are in .claude/rules/
+CLAUDE.md serves as overview and quick reference.
+
+Note: "Current Focus" and "Key Files" are managed by Claude's
+auto memory — no need to maintain these in CLAUDE.md.
+
+Run `/blueprint:status` to see full configuration.
+```
+
+
+### Step 11: Prompt for next action
+
+Use report to orchestrator:
+
+```
+question: "CLAUDE.md updated. What would you like to do next?"
+options:
+  - label: "Check blueprint status (Recommended)"
+    description: "Run /blueprint:status to verify configuration"
+  - label: "Manage modular rules"
+    description: "Add or edit rules in .claude/rules/"
+  - label: "Continue development"
+    description: "Run /project:continue to work on next task"
+  - label: "I'm done for now"
+    description: "Exit - CLAUDE.md is saved"
+```
+
+**Based on selection:**
+- "Check blueprint status" → Run `/blueprint:status`
+- "Manage modular rules" → Run `/blueprint:rules`
+- "Continue development" → Run `/project:continue`
+- "I'm done" → Exit
 
 ---
 
@@ -1204,9 +1102,11 @@ Analyze and validate documentation quality for a codebase, ensuring PRDs, ADRs, 
 Perform a comprehensive documentation quality analysis using the following methodology:
 
 
-## Phase 1: Create Todo List
+## Phase 1: Plan the analysis
 
-Create a structured todo list for tracking the analysis:
+Track the analysis against this checklist (via `TodoWrite` when the session
+has the task tools — see `.claude/rules/agentic-permissions.md` § Task-tool
+availability — otherwise carry it as a checklist in your response):
 
 ```
 - Analyze CLAUDE.md structure and quality
@@ -1285,7 +1185,6 @@ For each rule file in `.claude/rules/`:
 created: YYYY-MM-DD
 modified: YYYY-MM-DD
 reviewed: YYYY-MM-DD
-name: docs-quality-check
 ---
 ```
 
@@ -1314,30 +1213,8 @@ name: docs-quality-check
 
 
 ### 4.2 ADR Structure Validation
-For each ADR, verify:
-
-**Naming Convention**:
-- Format: `NNNN-kebab-case-title.md` (e.g., `0001-plugin-architecture.md`)
-- Sequential numbering
-- Descriptive titles
-
-**Required Sections** (MADR format):
-```markdown
-
-# ADR-NNNN: Title
-
-**Date**: YYYY-MM
-**Status**: Accepted | Superseded | Deprecated
-**Deciders**: [who made the decision]
-
-
-## Decision
-[The change being proposed or made]
-
-
-## Consequences
-[What becomes easier or harder]
-```
+For each ADR, verify naming and the required MADR sections against
+[references/doc-standards.md](references/doc-standards.md#42-adr-structure-validation).
 
 
 ### 4.3 ADR Quality Checks
@@ -1362,27 +1239,8 @@ For each ADR, verify:
 
 
 ### 5.2 PRD Structure Validation
-For each PRD, verify:
-
-**Frontmatter** (if using Blueprint methodology):
-```yaml
----
-created: YYYY-MM-DD
-modified: YYYY-MM-DD
-reviewed: YYYY-MM-DD
-status: Draft | Active | Implemented | Archived
-name: docs-quality-check
----
-```
-
-**Required Sections**:
-- Executive Summary / Problem Statement
-- Stakeholders & User Personas
-- Functional Requirements
-- Non-Functional Requirements
-- Success Metrics
-- Scope (In/Out of scope)
-- Technical Considerations
+For each PRD, verify frontmatter and required sections against
+[references/doc-standards.md](references/doc-standards.md#52-prd-structure-validation).
 
 
 ### 5.3 PRD Quality Checks
@@ -1402,16 +1260,8 @@ name: docs-quality-check
 
 
 ### 6.2 PRP Structure Validation
-For each PRP, verify:
-
-**Required Sections**:
-- Goal & Why
-- Success Criteria (testable)
-- Context (documentation refs, codebase intelligence, known gotchas)
-- Implementation Blueprint (architecture, task breakdown)
-- TDD Requirements (test strategy, critical test cases)
-- Validation Gates (executable commands)
-- Confidence Score (0-10 across dimensions)
+For each PRP, verify the required sections against
+[references/doc-standards.md](references/doc-standards.md#62-prp-structure-validation).
 
 
 ### 6.3 PRP Quality Checks
@@ -1451,133 +1301,18 @@ git log -1 --format="%ai %s" -- CLAUDE.md 2>/dev/null || echo "No git history"
 
 ## Phase 8: Generate Quality Report
 
-
-### 8.1 Documentation Inventory
-
-Generate a summary table:
-
-```markdown
-
-## Documentation Inventory
-
-| Document Type | Status | Count | Issues |
-|---------------|--------|-------|--------|
-| CLAUDE.md | ✅/❌ | 1 | [list issues] |
-| .claude/rules/ | ✅/❌ | N files | [list issues] |
-| ADRs | ✅/❌ | N files | [list issues] |
-| PRDs | ✅/❌ | N files | [list issues] |
-| PRPs | ✅/❌ | N files | [list issues] |
-```
-
-
-### 8.2 Quality Score
-
-Calculate an overall quality score:
-
-| Category | Score (0-10) | Notes |
-|----------|--------------|-------|
-| Structure | X | File organization, naming |
-| Completeness | X | Required sections present |
-| Freshness | X | Recent updates, git sync |
-| Standards Compliance | X | Frontmatter, format |
-| Content Quality | X | Clarity, specificity |
-| **Overall** | **X** | Average score |
-
-**Rating Guide**:
-- 9-10: Excellent - Well-maintained, comprehensive
-- 7-8: Good - Minor improvements needed
-- 5-6: Fair - Several issues to address
-- 3-4: Poor - Major gaps or outdated
-- 0-2: Critical - Missing or severely lacking
-
-
-### 8.3 Issues and Recommendations
-
-Categorize findings:
-
-**Critical Issues** (must fix):
-- Missing required documentation
-- Severe structural problems
-- Completely outdated information
-
-**Warnings** (should fix):
-- Stale documentation (>6 months)
-- Missing frontmatter
-- Incomplete sections
-- Minor structural issues
-
-**Suggestions** (nice to have):
-- Additional documentation that would help
-- Improved organization
-- Better cross-referencing
-- Enhanced examples
-
-
-### 8.4 Actionable Recommendations
-
-For each issue, provide specific guidance:
-
-```markdown
-
-## Recommendations
-
-
-### Immediate Actions
-1. [ ] Fix [specific issue] in [file]
-   - **Why**: [reason]
-   - **How**: [specific steps]
-   - **Command**: [if applicable]
-
-2. [ ] Update [document]
-   - **Why**: [reason]
-   - **How**: [specific steps]
-
-
-### Maintenance Tasks
-1. [ ] Review and update stale documents:
-   - [file1] - last modified [date]
-   - [file2] - last modified [date]
-
-2. [ ] Improve documentation coverage:
-   - [ ] Document [undocumented decision]
-   - [ ] Create ADR for [architectural choice]
-
-
-### Best Practices
-- Run `/code:docs-quality` monthly
-- Update `modified` dates when editing docs
-- Review `reviewed` dates quarterly
-- Use `/blueprint:adr` for new architecture decisions
-- Use `/blueprint:prd` for new features
-```
+Build the report in four parts — 8.1 documentation inventory table, 8.2 quality
+score (0-10 per category, with rating guide), 8.3 issues categorized as Critical /
+Warnings / Suggestions, 8.4 actionable recommendations — using the templates in
+[references/report-templates.md](references/report-templates.md).
 
 
 ## Phase 9: Present Results
 
 
 ### 9.1 Executive Summary
-Show a clear, concise summary:
-
-```
-📊 Documentation Quality Report
-═══════════════════════════════
-
-Overall Score: X/10 ([Excellent/Good/Fair/Poor/Critical])
-
-✅ Strengths:
-- [strength 1]
-- [strength 2]
-
-⚠️  Issues Found:
-- [issue 1]
-- [issue 2]
-
-📋 Recommendations:
-- [top recommendation 1]
-- [top recommendation 2]
-
-See full report below for details.
-```
+Show a clear, concise summary using the executive-summary template in
+[references/report-templates.md](references/report-templates.md#91-executive-summary).
 
 
 ### 9.2 Full Report
@@ -1593,8 +1328,8 @@ Present the complete analysis with:
 
 Help the user understand next steps:
 - If Blueprint not initialized → suggest `/blueprint:init`
-- If ADRs missing → suggest `/blueprint:adr`
-- If PRDs missing → suggest `/blueprint:prd`
+- If ADRs missing → suggest `/blueprint:derive-plans`
+- If PRDs missing → suggest `/blueprint:derive-plans`
 - If documentation tooling not configured → suggest `/configure:docs`
 - If documentation outdated → provide update checklist
 - If standards not followed → show examples and templates
@@ -1612,13 +1347,8 @@ Help the user understand next steps:
 
 
 ### For Documentation Standards
-- **Frontmatter**: Always include created/modified/reviewed dates
-- **Structure**: Follow established templates (ADR, PRD, PRP)
-- **Clarity**: Write for future maintainers and AI assistants
-- **Maintenance**: Review quarterly, update modified dates
-- **Cross-reference**: Link related documentation
-- **Examples**: Include code snippets and real examples
-- **Scope**: Keep focused - one concern per document
+The general standards to recommend (frontmatter dates, templates, maintenance
+cadence) are in [references/doc-standards.md](references/doc-standards.md#for-documentation-standards).
 
 
 ## Error Handling

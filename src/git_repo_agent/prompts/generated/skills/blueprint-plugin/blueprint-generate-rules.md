@@ -209,8 +209,6 @@ Generate project-specific rules from Product Requirements Documents.
    ```
    question: "Rules generated. What would you like to do next?"
    options:
-     - label: "Generate workflow commands (Recommended)"
-       description: "Create /project:continue and /project:test-loop commands"
      - label: "Update CLAUDE.md"
        description: "Regenerate project overview document with new rules"
      - label: "Review generated rules"
@@ -220,7 +218,6 @@ Generate project-specific rules from Product Requirements Documents.
    ```
 
    **Based on selection:**
-   - "Generate workflow commands" -> Run `/blueprint:generate-commands`
    - "Update CLAUDE.md" -> Run `/blueprint:claude-md`
    - "Review generated rules" -> Show rule file locations and exit
    - "I'm done for now" -> Exit
