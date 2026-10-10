@@ -4,7 +4,7 @@
 
 **Delegate this task to the `test-runner` agent.**
 
-Use the Agent tool with `subagent_type: test-runner` to run tests with the appropriate framework. Pass all the context gathered above and the parsed parameters to the agent.
+Use the Agent tool with `subagent_type: testing-plugin:test-runner` to run tests with the appropriate framework. Pass all the context gathered in [Context](#context) and the parsed parameters to the agent.
 
 The test-runner agent should:
 
@@ -41,7 +41,7 @@ The test-runner agent should:
    - If slow: optimization suggestions
 
 Provide the agent with:
-- All context from the section above
+- All context from [Context](#context)
 - The parsed parameters (pattern, --coverage, --watch)
 - Any specific test configuration detected
 
@@ -263,7 +263,7 @@ This skill auto-activates when:
 
 # Test Analysis and Fix Planning
 
-Analyzes test results from any testing framework, uses Zen planner to create a systematic fix strategy, and delegates fixes to appropriate subagents.
+Analyzes test results from any testing framework, uses PAL planner to create a systematic fix strategy, and delegates fixes to appropriate subagents.
 
 
 ## Usage
@@ -271,50 +271,6 @@ Analyzes test results from any testing framework, uses Zen planner to create a s
 ```bash
 /test:analyze <results-path> [--type <test-type>] [--focus <area>]
 ```
-
-
-## Examples
-
-```bash
-
-# Analyze Playwright accessibility test results
-/test:analyze ./test-results/ --type accessibility
-
-
-# Analyze unit test failures with focus on auth
-/test:analyze ./coverage/junit.xml --type unit --focus authentication
-
-
-# Auto-detect test type and analyze all issues
-/test:analyze ./test-output/
-
-
-# Analyze security scan results
-/test:analyze ./security-report.json --type security
-```
-
-
-## Command Flow
-
-1. **Analyze Test Results**
-   - Parse test result files (XML, JSON, HTML, text)
-   - Extract failures, errors, warnings
-   - Categorize issues by type and severity
-   - Identify patterns and root causes
-
-2. **Plan Fixes with PAL Planner**
-   - Use `mcp__pal__planner` for systematic planning
-   - Break down complex fixes into actionable steps
-   - Identify dependencies between fixes
-   - Estimate effort and priority
-
-3. **Delegate to Subagents**
-   - Route each issue category through the [Subagent Routing](#subagent-routing) table below — it is the single source of truth for every `subagent_type` this skill dispatches.
-
-4. **Execute Plan**
-   - Sequential execution based on dependencies
-   - Verification after each fix
-   - Re-run tests to confirm resolution
 
 
 ## Subagent Routing
@@ -352,6 +308,10 @@ caps the harness at 8 concurrent agents; (b) the `category` and `severity` enums
 `parallel()` barrier before Synthesize — group agents emit `depends_on` edges pointing at
 failures in *other* groups, so the ordering only exists once every group has returned.
 
+**Agent budget:** 2 + agent types — parse and synthesize, plus one planning agent
+per routed agent type (at most 8, the `AGENT_FOR` table). The scale guard asks
+before every run, because the groups are derived from the parsed failures.
+
 **Skip the harness when:** there are fewer than 5 routable failures — the script returns
 `{mode:'inline'}` at that floor, because below it one opus agent per category costs more
 than the linear pass. That floor is a hard bound, not a tunable knob. The steps below
@@ -360,59 +320,18 @@ fixes *how* the work is split.
 
 Two consequences worth stating inline:
 
-- **The harness surrenders `mcp__pal__planner`.** A workflow script cannot reach MCP
+- **The harness surrenders `mcp__pal-mcp-server__planner`.** A workflow script cannot reach MCP
   tools, so the dependency edges in the merged plan are *inferred by the group agents*,
   not planned. A run that genuinely needs PAL planning (Step 2 below) should stay inline.
 - **`context: fork` stays, and it is not what justifies the harness.** The pin lives in
-  `scripts/plugin-compliance-check.sh` (the `context: fork` guard list, currently around
-  lines 898–914) and is unchanged by this template. Per
+  `scripts/plugin-compliance-check.sh` (the `for fork_skill in` loop inside
+  `check_skill_body()` — cited by name, because a line number in that file drifts every
+  time a regression guard is inserted) and is unchanged by this template. Per
   `.claude/rules/workflow-vs-skill.md` § "The `context: fork` corollary", fork already
   bought context isolation for free — so this harness has to earn its tokens by
   **splitting** the planning work across agent types behind a real barrier, which it does.
   The `parallel()` width is capped at the fixed agent-type set (8) precisely so it does
   not become the wide fan-out `.claude/rules/skill-fork-context.md` warns about.
-
-
-## Output
-
-The command produces:
-
-1. **Summary Report**
-   - Total issues found
-   - Breakdown by category/severity
-   - Top priorities
-
-2. **Fix Plan** (from PAL planner)
-   - Step-by-step remediation strategy
-   - Dependency graph
-   - Effort estimates
-
-3. **Subagent Assignments**
-   - Which agent handles which issues
-   - Rationale for delegation
-   - Execution order
-
-4. **Actionable Next Steps**
-   - Commands to run
-   - Files to modify
-   - Verification steps
-
-
-## Notes
-
-- Works with any test framework that produces structured output
-- Auto-detects common test result formats (JUnit XML, JSON, TAP)
-- Preserves test evidence for debugging
-- Can be chained with `/git:smartcommit` for automated fixes
-- Respects TDD workflow (RED → GREEN → REFACTOR)
-
-
-## Related Commands
-
-- `/test:run` - Run tests with framework detection
-- `/code:review` - Manual code review for test files
-- `/docs:update` - Update test documentation
-- `/git:smartcommit` - Commit fixes with conventional messages
 
 ---
 
@@ -440,7 +359,7 @@ Read the test result files from `<results-path>` and extract:
 
 **Step 2: Use PAL Planner**
 
-Call `mcp__pal__planner` with model "gemini-2.5-pro" to create a systematic fix plan:
+Call `mcp__pal-mcp-server__planner` (no model call; omit `model`) to create a systematic fix plan:
 - Step 1: Summarize findings and identify root causes
 - Step 2: Prioritize issues (impact × effort matrix)
 - Step 3: Break down fixes into actionable tasks
@@ -486,7 +405,9 @@ do not invent a focus.
 3. Refactor for quality
 4. Re-run tests to confirm
 
-Do you want me to proceed with the analysis and planning, or would you like to review the plan first?
+Proceed with the analysis and planning now — this skill runs `context: fork`
+and cannot wait for a reply. Present the completed Step 5 summary as the
+deliverable; the caller reviews the plan after the fact, not before it.
 
 ---
 

@@ -12,7 +12,7 @@ Execute this linting configuration check:
 
 ### Step 1: Detect project language and existing linters
 
-Read the context values above and determine:
+Read the values in [Context](#context) and determine:
 
 | Indicator | Language | Detected Linter |
 |-----------|----------|-----------------|
@@ -389,16 +389,16 @@ cargo clippy --all-targets --all-features -- -D warnings
 ### Flake8/isort/black to Ruff
 
 1. Install Ruff: `uv add --group dev ruff`
-2. Configure in `pyproject.toml` (see Ruff template above)
+2. Configure in `pyproject.toml` (see [§ pyproject.toml Template](#pyprojecttoml-template))
 3. Remove old tools: `uv remove flake8 isort black pyupgrade`
 4. Remove old config files: `rm .flake8 .isort.cfg`
-5. Update pre-commit hooks (see below)
+5. Update pre-commit hooks (see [§ Pre-commit Integration](#pre-commit-integration))
 
 
 ### ESLint to Biome
 
 1. Install Biome: `bun add --dev @biomejs/biome`
-2. Create `biome.json` (see template above)
+2. Create `biome.json` (see [§ biome.json Template](#biomejson-template))
 3. Remove ESLint: `bun remove eslint @typescript-eslint/parser @typescript-eslint/eslint-plugin`
 4. Remove config files: `rm .eslintrc* .eslintignore`
 5. Update npm scripts and pre-commit hooks
@@ -548,6 +548,22 @@ report formatter detection (`BIOME`, `PRETTIER`, `RUFF_FORMAT`, `BLACK`,
 `PRE_COMMIT_FORMAT`, `CI_FORMAT`), and a `RECOMMENDATION` of `configured`
 (a modern formatter is set up), `migrate` (a legacy formatter wants migration to
 Biome/Ruff), or `setup` (no formatter detected).
+
+**How `CI_FORMAT` is decided.** The probe scans `.github/workflows/*.yml|yaml`
+for a command that runs the formatter, then resolves **one** level of
+package-script indirection:
+
+| Signal | `CI_FORMAT` | Why |
+|--------|-------------|-----|
+| Workflow runs `biome check` / `biome ci` | `true` | In Biome 2.x `check` is the combined command (formatter + linter + import sorting); `ci` is its CI-oriented variant |
+| Workflow runs `biome format`, `ruff format`, `cargo fmt`, `prettier` | `true` | Format-only commands, named directly |
+| Workflow runs `biome lint` | `false` | Lint-only — it does not format |
+| Workflow runs `bun run <s>` / `npm run <s>` / `pnpm run <s>` / `yarn <s>` and `package.json`'s `scripts.<s>` contains any command above | `true` | The idiomatic setup keeps the real command in `package.json` |
+| That script calls *another* script (depth 2+) | `false` | Exactly one level is resolved; deeper chains are out of scope |
+
+Indirection needs `jq` and a readable `package.json`. When `package.json` is
+absent, unparseable, or has no `scripts` key — or `jq` is unavailable — the
+lookup degrades silently to the direct-command scan (no stderr, exit 0).
 
 **Modern formatting preferences:**
 - **JavaScript/TypeScript**: Biome (replaces Prettier + ESLint). On `RECOMMENDATION=migrate` with Prettier present, offer migration to Biome — do not configure Prettier as the target formatter.
@@ -1627,6 +1643,7 @@ Compare existing configuration against the project standards in :
 **Required Base Hooks (All Projects):**
 - `pre-commit-hooks` v5.0.0+ with: trailing-whitespace, end-of-file-fixer, check-yaml, check-json, check-merge-conflict, check-added-large-files
 - `conventional-pre-commit` v4.3.0+ with commit-msg stage
+- `default_install_hook_types` listing `pre-commit` and `commit-msg`, plus `default_stages: [pre-commit]` whenever `commit-msg` is installed. Flag a missing `default_stages` as WARN: without it every unstaged file hook runs at both installed stages, so each commit runs the hook list twice
 
 **Frontend-specific:**
 - `biome` (pre-commit) v0.4.0+
@@ -1656,6 +1673,10 @@ Config File: .pre-commit-config.yaml ([found|missing])
 Hook Status:
   [hook-name]     [version]   [PASS|WARN|FAIL] ([details])
 
+Hook Types:
+  default_install_hook_types  [pre-commit, commit-msg]  [PASS|FAIL]
+  default_stages              [pre-commit]              [PASS|WARN] (missing: file hooks run twice per commit)
+
 Outdated Hooks:
   - [hook]: [current] -> [standard]
 
@@ -1670,9 +1691,9 @@ If `--fix` flag is set or user confirms:
 1. **Missing config file**: Create from standard template for detected project type
 2. **Missing hooks**: Add required hooks with standard versions
 3. **Outdated versions**: Update `rev:` values to standard versions
-4. **Missing hook types**: Add `default_install_hook_types` with `pre-commit` and `commit-msg`
+4. **Missing hook types**: Add `default_install_hook_types` with `pre-commit` and `commit-msg`, and `default_stages: [pre-commit]` beside it. Keep the explicit `stages: [commit-msg]` on conventional-pre-commit or commitizen hooks
 
-After modification, run `pre-commit install --install-hooks` to install hooks.
+After modification, run `pre-commit install --install-hooks`. `default_install_hook_types` makes that one command install both hook types; see  for why `default_stages` is needed.
 
 
 ### Step 7: Update standards tracking
@@ -1732,6 +1753,7 @@ Required hooks for frontend applications:
 default_install_hook_types:
   - pre-commit
   - commit-msg
+default_stages: [pre-commit]
 
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
@@ -1777,6 +1799,7 @@ Required hooks for infrastructure (Terraform, Helm, ArgoCD):
 default_install_hook_types:
   - pre-commit
   - commit-msg
+default_stages: [pre-commit]
 
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
@@ -1832,6 +1855,7 @@ Required hooks for Python projects:
 default_install_hook_types:
   - pre-commit
   - commit-msg
+default_stages: [pre-commit]
 
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
@@ -1884,6 +1908,11 @@ Every repository MUST have these hooks:
 2. **conventional-pre-commit** (v4.4.0+)
    - `conventional-pre-commit` in `commit-msg` stage
 
+3. **Hook-type settings**
+   - `default_install_hook_types` lists `pre-commit` and `commit-msg`
+   - `default_stages: [pre-commit]` is set whenever `commit-msg` is installed
+     (WARN when missing: every file hook runs twice per commit)
+
 
 ### Status Levels
 
@@ -1934,15 +1963,26 @@ No special exclusions needed for standard Python projects.
 After configuring `.pre-commit-config.yaml`:
 
 ```bash
-pre-commit install
-pre-commit install --hook-type commit-msg
-```
-
-Or simply:
-
-```bash
 pre-commit install --install-hooks
 ```
+
+`default_install_hook_types` makes that one command install both the
+`pre-commit` and `commit-msg` hook types; `--install-hooks` also builds the hook
+environments up front. Without `default_install_hook_types`, plain
+`pre-commit install` installs only the `pre-commit` type and commit-msg hooks
+never run.
+
+
+### Why `default_stages: [pre-commit]`
+
+A hook with no `stages` key runs at every installed stage. Once the
+`commit-msg` type is installed, every file hook (whitespace fixers,
+`check-yaml`, `gitleaks`, …) runs twice per commit, once at pre-commit and again
+at commit-msg, which doubles the time and prints the hook list twice.
+`default_stages: [pre-commit]` confines unstaged hooks to the pre-commit stage;
+the message hooks keep their explicit `stages: [commit-msg]`. Write it whenever
+`commit-msg` is among the installed hook types (observed with pre-commit 4.6.2
+and pre-commit-hooks v6.0.0, #2824).
 
 
 ## Updating
@@ -1981,7 +2021,7 @@ Verify latest versions before reporting outdated actions:
 6. `docker/login-action` - [releases](https://github.com/docker/login-action/releases)
 7. `docker/metadata-action` - [releases](https://github.com/docker/metadata-action/releases)
 8. `reproducible-containers/buildkit-cache-dance` - [releases](https://github.com/reproducible-containers/buildkit-cache-dance/releases)
-9. `google-github-actions/release-please-action` - [releases](https://github.com/google-github-actions/release-please-action/releases)
+9. `googleapis/release-please-action` - [releases](https://github.com/googleapis/release-please-action/releases)
 
 Use WebSearch or WebFetch to verify current versions.
 
@@ -1990,15 +2030,18 @@ Use WebSearch or WebFetch to verify current versions.
 
 1. Check for `.github/workflows/` directory
 2. List all workflow files (*.yml, *.yaml)
-3. Categorize workflows by purpose (container build, test, release)
+3. Categorize workflows by purpose (container build, test, release, renovate)
+4. Read the repo owner from `git remote get-url origin`. An owner of `laurigates` means the account-wide `laurigates-renovate` App autodiscovers the repo and already runs Renovate for it
 
 Determine required workflows based on project type:
 
 | Project Type | Required Workflows |
 |--------------|-------------------|
-| Frontend | container-build, release-please, renovate (optional: claude-auto-fix) |
-| Python | container-build, release-please, test, renovate (optional: claude-auto-fix) |
-| Infrastructure | release-please, renovate (optional: docs, claude-auto-fix) |
+| Frontend | container-build, release-please (optional: claude-auto-fix) |
+| Python | container-build, release-please, test (optional: claude-auto-fix) |
+| Infrastructure | release-please (optional: docs, claude-auto-fix) |
+
+Renovate is not a per-project-type requirement; where it runs depends on the repo owner (see the Renovate Workflow Checks table). A repo the `laurigates-renovate` App covers needs no Renovate workflow at all. A repo in an org the App does not cover gets the reusable Renovate caller from .
 
 
 ### Step 3: Analyze workflow compliance
@@ -2026,7 +2069,7 @@ Determine required workflows based on project type:
 
 | Check | Standard | Severity |
 |-------|----------|----------|
-| Action version | v4 | WARN if older |
+| Action version | v5 | WARN if older |
 | Token | MY_RELEASE_PLEASE_TOKEN | WARN if GITHUB_TOKEN |
 | Permissions | contents: write, pull-requests: write | FAIL if missing |
 
@@ -2040,6 +2083,17 @@ Determine required workflows based on project type:
 | Coverage | Coverage upload | INFO |
 
 **Renovate Workflow Checks:**
+
+Decide coverage first, from the owner read in Step 2:
+
+| Repo owner | Per-repo Renovate workflow | Verdict |
+|------------|----------------------------|---------|
+| `laurigates` (App-covered) | Absent | PASS — the `laurigates-renovate` App runs Renovate |
+| `laurigates` (App-covered) | Present (`renovatebot/github-action` or a reusable Renovate caller) | WARN: duplicate Renovate identity — two dependency dashboards contend on the same `renovate/*` branches; recommend removing the workflow |
+| Any other org | Absent | INFO — recommend the reusable caller |
+| Any other org | Present | Run the per-repo checks |
+
+Per-repo checks, only for a repo the App does not cover:
 
 | Check | Standard | Severity |
 |-------|----------|----------|
@@ -2075,6 +2129,7 @@ For the report format, see .
 2. **Outdated actions**: Update version numbers
 3. **Missing multi-platform**: Add platforms to build-push
 4. **Missing caching**: Add GHA cache configuration
+5. **Duplicate Renovate identity**: Delete the per-repo Renovate workflow only after the user confirms, since `--fix` never removes a workflow on its own
 
 For standard templates (container build, test workflow), see .
 
@@ -2113,8 +2168,12 @@ container-build.yml Checks:
   Permissions           Explicit        [PASS | MISSING]
 
 release-please.yml Checks:
-  Action version        v4              [PASS | OUTDATED]
+  Action version        v5              [PASS | OUTDATED]
   Token                 MY_RELEASE...   [PASS | WRONG TOKEN]
+
+Renovate:
+  Owner                 laurigates      [App-covered | not covered]
+  Per-repo workflow     renovate.yml    [PASS (absent) | WARN duplicate Renovate identity]
 
 Missing Workflows:
   - test.yml (recommended for frontend projects)
@@ -2278,6 +2337,12 @@ jobs:
 
 
 ## Renovate Caller Workflow Template
+
+Only for a repo whose org the account-wide `laurigates-renovate` App does not
+cover, such as `ForumViriumHelsinki`. A `laurigates/*` repo gets Renovate from
+the App, and adding this caller there creates a duplicate Renovate identity: a
+second dependency dashboard and a second runner contending on the same
+`renovate/*` branches.
 
 ```yaml
 name: Renovate
@@ -2533,17 +2598,19 @@ jobs:
 
             If PR failure, comment on PR #${{ steps.context.outputs.pr_number }} with issue link.
 
-            ### Important Rules
+            ### Constraints (this run is unattended — nobody can answer a question, so act on these rather than asking)
 
-            - Do NOT force push or rewrite history
-            - Do NOT modify workflow files (.github/workflows/)
-            - Do NOT add new dependencies without strong justification
-            - Do NOT make unrelated changes
-            - If in doubt, prefer opening an issue
-            - Use the project conventions from CLAUDE.md
+            - No force-push or history rewrite: the branch may already be checked out by a reviewer, and a rewrite destroys their view of what failed.
+            - Leave `.github/workflows/` alone: the token this job runs with cannot push workflow-file changes, and those files need a human change anyway.
+            - No new dependencies unless the failure is literally a missing one: a dependency added by a bot lands unreviewed in the lockfile.
+            - Fix only what the failing job reported. Note any unrelated bug you notice in the PR body as a follow-up instead of changing it.
+            - Follow the project conventions in CLAUDE.md.
+            - When you are unsure the fix is right, open the issue (Step 3B) and stop.
 
+          # opus is an alias for the current Opus generation; set --effort explicitly — it is the cost lever and the harness default is high.
           claude_args: |
-            --model claude-sonnet-4-6
+            --model opus
+            --effort medium
             --allowedTools "Edit,MultiEdit,Write,Read,Glob,Grep,Bash(npm:*),Bash(npx:*),Bash(yarn:*),Bash(pnpm:*),Bash(bun:*),Bash(bunx:*),Bash(pip:*),Bash(python:*),Bash(cargo:*),Bash(go:*),Bash(make:*),Bash(just:*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git branch:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(git switch:*),Bash(git checkout -b:*),Bash(gh issue create:*),Bash(gh issue list:*),Bash(gh issue comment:*),Bash(gh pr create:*),Bash(gh pr list:*),Bash(gh pr comment:*),Bash(gh pr view:*),Bash(gh run view:*),Bash(gh run list:*),Bash(ls:*),Bash(find:*),Bash(grep:*),Bash(cat:*)"
             --max-turns 50
 ```
@@ -2740,6 +2807,7 @@ export default defineConfig({
         statements: 80,
       },
 
+      // Load-bearing: pins the denominator to source files (see below)
       include: ['src/**/*.{js,ts,jsx,tsx}'],
 
       exclude: [
@@ -2755,12 +2823,15 @@ export default defineConfig({
       ],
 
       clean: true,
-      all: true,
       skipFull: false,
     },
   },
 });
 ```
+
+**Vitest 4 removed `coverage.all`** (and `coverage.extensions`). It now reports only the files the tests loaded, unless `coverage.include` is set. An `all: true` left in a v4 config is silently ignored, so the config looks correct while the denominator stays unpinned. Use `include` in its place.
+
+Without `include`, the denominator is the test suite's import graph, not the codebase. A PR that adds *only tests* can then lower the measured figure and fail its own threshold. The first test that imports a module with many untested siblings pulls them in at near-zero coverage (observed: 61.8% → 42.0% against 60% thresholds, with no regression). Treat thresholds as a ratchet. A change of basis, such as adding `include`, goes in its own commit that states the old and new figures.
 
 
 ### Package.json Scripts
@@ -3097,7 +3168,9 @@ Determine appropriate release-type from detected package files:
 ### Step 3: Analyze compliance
 
 **Workflow file checks**:
-- Action version: `googleapis/release-please-action@v4`
+- Action version: `googleapis/release-please-action@v5` (the portfolio
+  standard; v5's only breaking change is the node24 runtime, so a v4 workflow
+  upgrades without input changes)
 - Token: Uses a non-`GITHUB_TOKEN` release token. Accept **either** pattern:
   - **GitHub App token (preferred)** — `actions/create-github-app-token` mints
     a token from `app-id: ${{ vars.RELEASE_PLEASE_APP_ID }}` /
@@ -3130,7 +3203,7 @@ For the report format, see .
 1. **Missing workflow**: Create from standard template
 2. **Missing config**: Create with detected release-type
 3. **Missing manifest**: Create with initial version `0.0.0`
-4. **Outdated action**: Update to v4
+4. **Outdated action**: Update to v5
 5. **Wrong token**: Use the GitHub App-token pattern (preferred) or
    `MY_RELEASE_PLEASE_TOKEN` — never `GITHUB_TOKEN`. A workflow already on
    `create-github-app-token` is compliant; leave it as-is.
@@ -3227,7 +3300,7 @@ jobs:
         with:
           app-id: ${{ vars.RELEASE_PLEASE_APP_ID }}
           private-key: ${{ secrets.RELEASE_PLEASE_PRIVATE_KEY }}
-      - uses: googleapis/release-please-action@v4
+      - uses: googleapis/release-please-action@v5
         with:
           token: ${{ steps.app-token.outputs.token }}
 ```
@@ -3291,6 +3364,38 @@ jobs:
 Version `0.0.0` is a placeholder — release-please updates it automatically.
 
 
+### Immutable Releases: Draft, Attach, Publish
+
+With GitHub [immutable releases](https://docs.github.com/en/code-security/concepts/supply-chain-security/immutable-releases)
+enabled, assets cannot be added to a release after it is published. An upload
+step triggered by `release: published` therefore fails, and anything after it
+in the job, such as a store or registry publish, is skipped. Follow GitHub's
+recommended order instead: create a draft, attach the assets, then publish.
+
+```json
+{
+  "packages": { ".": { "release-type": "node" } },
+  "draft": true,
+  "force-tag-creation": true
+}
+```
+
+- `force-tag-creation` is required with `draft`. GitHub creates no tag for a
+  draft until it is published, so without it release-please cannot find the
+  previous release on its next run.
+- Gate an asset job in the release-please workflow on
+  `release_created == 'true'`. It builds from `tag_name`, uploads to the draft,
+  runs any external publish, and finally publishes the draft
+  (`gh release edit <tag> --draft=false`).
+- A release that stays in draft means that job did not finish. Retry it with
+  **Re-run failed jobs**. A full re-run recomputes `release_created`, finds
+  nothing new to release, and skips the job. Any re-run replays the workflow
+  file from the original commit, so a fix merged since then does not apply.
+  Rebuild from a new `workflow_dispatch` run instead.
+- To rebuild an already-published release, a `workflow_dispatch` run with a
+  `tag` input can build it, but the assets can only go to a run artifact.
+
+
 ## Project Type Variations
 
 | Project type | release-type | Updates |
@@ -3325,7 +3430,10 @@ to switch to `MY_RELEASE_PLEASE_TOKEN`.
 | FAIL | Missing required files or invalid configuration |
 
 1. **Workflow**: action version v5 (warn if older); token from a secret,
-   never hardcoded; triggers on `push` to `main`
+   never hardcoded; triggers on `push` to `main`. v5's one breaking change
+   (5.0.0, 2026-04-22) is the move to the node24 runtime: inputs and outputs
+   are unchanged, so `@v4` → `@v5` is a ref bump, but a self-hosted runner
+   must be new enough to run node24 actions.
 2. **Config**: valid release-type (`node`, `python`, `helm`, `simple`);
    changelog-sections include at least `feat` and `fix`
 3. **Manifest**: valid JSON; packages match the config
@@ -3351,7 +3459,7 @@ Release-please manages these automatically — never edit them manually:
 
 ## Installation Steps
 
-1. Create workflow, config, and manifest files (templates above)
+1. Create workflow, config, and manifest files ([§ Standard Templates](#standard-templates))
 2. Provide the release token — preferred: `RELEASE_PLEASE_APP_ID` variable +
    `RELEASE_PLEASE_PRIVATE_KEY` secret (gitops provisions these on
    `release_please = true` repos); legacy: `MY_RELEASE_PLEASE_TOKEN` secret
@@ -3365,6 +3473,8 @@ Release-please manages these automatically — never edit them manually:
 | Release PR not created | Conventional commit format; workflow permissions; token has write access |
 | Version not updated | Manifest is valid JSON; release-type matches project; release-please logs in Actions |
 | CI not running on release PR | Token must be a dedicated release token (App token or PAT), not `GITHUB_TOKEN` |
+| Asset upload fails on a published release; later publish steps skipped | Immutable releases are on — use `draft: true` + `force-tag-creation` (see [§ Immutable Releases](#immutable-releases-draft-attach-publish)) |
+| Release stuck in draft | The asset/publish job did not finish — **Re-run failed jobs**, not a full re-run |
 
 ---
 
