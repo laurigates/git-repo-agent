@@ -15,14 +15,14 @@ Execute complete ADR validation and remediation workflow:
 1. Check for ADR directory at `docs/adrs/`
 2. If missing → Error: "No ADRs found in docs/adrs/"
 3. Parse all ADR files: `ls docs/adrs/*.md`
-4. Extract frontmatter for each ADR: number, date, status, domain, supersedes, superseded_by, extends, related
+4. Extract frontmatter for each ADR: number, id, created, modified, status, domain, supersedes, superseded-by, extends, relates-to
 
 
 ### Step 2: Validate reference integrity
 
 For each ADR, validate:
 
-1. **supersedes references**: Verify target exists, target status = "Superseded", target has reciprocal superseded_by
+1. **supersedes references**: Verify target exists, target status = "Superseded", target has reciprocal superseded-by
 2. **extends references**: Verify target exists, warn if target is "Superseded"
 3. **related references**: Verify all targets exist, warn if one-way links
 4. **self-references**: Flag if ADR references itself
@@ -53,13 +53,14 @@ deterministic guard:
 bash ${CLAUDE_SKILL_DIR}/scripts/check-adr-numbers.sh --project-dir "$(pwd)"
 ```
 
-It emits the structured `STATUS=` / `ISSUE_COUNT=` convention and reports four
+It emits `STATUS=` / `REASON=` / `ISSUE_COUNT=` and reports these
 classes (see [REFERENCE.md](REFERENCE.md#validation-rules)):
 
-- `duplicate_adr_number` (ERROR) — two files claim the same number, by `NNNN-title.md` **filename** or by a frontmatter `id: ADR-NNNN` claim. The message names the source (`basename` / `frontmatter`), so a claim from a file with no number in its name is legible.
+- `duplicate_adr_number` (ERROR) — two files claim the same number, by `NNNN-` / `ADR-NNN-` **filename** or frontmatter `id: ADR-NNNN`. The message names the source (`basename` / `frontmatter`).
 - `adr_number_collision` (ERROR) — a working-tree ADR claims a number a **different** file already holds on the base ref (`origin/main`) — the pre-merge parallel-PR case, caught before the second PR merges.
 - `adr_registry_mismatch` (ERROR) — a file claims `ADR-NNNN` but the manifest `id_registry` maps that number to a different path. The registry is the only arbiter resolving id → path unambiguously: two files can both *say* `ADR-0016`, only one can be registered. Silent with no manifest / no `id_registry`.
 - `adr_missing_index_row` (WARN) — an ADR is missing from the directory's README index (how the `0038` collision went unnoticed for a week). Repair via Step 2c instead of re-warning.
+- `adr_dir_unrecognized_naming` (WARN) — no ADR number recognised (#2822).
 
 **Multiple ADR directories** (issue #2129): the guard scans a directory *set* —
 the real ADR-0016 collision had its claimants in `docs/adrs/` and
@@ -189,7 +190,7 @@ Report all changes made:
 ### Supersedes Validation
 - Target file must exist
 - Target status must be "Superseded"
-- Target must have `superseded_by: ADR-{this}`
+- Target must have `superseded-by: ADR-{this}`
 - Create error if any check fails
 
 
@@ -222,9 +223,10 @@ emits the `=== ADR NUMBER AUDIT ===` / `STATUS=` / `ISSUE_COUNT=` convention.
 
 | Type | Severity | Meaning |
 |------|----------|---------|
-| `duplicate_adr_number` | ERROR | Two files in the working tree lead with the same `NNNN-`. |
+| `duplicate_adr_number` | ERROR | Two files in the working tree lead with the same `NNNN-` or `ADR-NNN-` number (`ADR-001-x.md` and `0001-y.md` collide). |
 | `adr_number_collision` | ERROR | A working-tree ADR's number is already held by a **different** filename on the base ref (`origin/main`) — the pre-merge parallel-PR case. |
 | `adr_missing_index_row` | WARN | An ADR file is not referenced from the ADR directory's `README.md` index. |
+| `adr_dir_unrecognized_naming` | WARN | An ADR directory holds markdown files besides `README.md` / `index.md`, but none yields an ADR number (issue #2822). |
 
 It resolves the ADR directory as `docs/adrs/` (blueprint canonical) or
 `docs/adr/`, degrades to `STATUS=OK` when neither exists, and skips the base-ref
@@ -279,7 +281,7 @@ Untagged ADRs (consider adding domain):
 
 ### Fix All Automatically
 For each error:
-1. If supersession mismatch → Update target status to "Superseded", add `superseded_by`
+1. If supersession mismatch → Update target status to "Superseded", add `superseded-by`
 2. If one-way link → Add reciprocal `related:` entry to target
 
 
