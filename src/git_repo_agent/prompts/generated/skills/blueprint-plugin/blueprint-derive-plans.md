@@ -12,7 +12,7 @@ Execute this retroactive documentation generation workflow:
 
 ### Step 1: Verify prerequisites
 
-Check context values above:
+Check the values in [Context](#context):
 
 1. If git repository = "NO" → Error: "This directory is not a git repository. Run from project root."
 2. If total commits = "0" → Error: "Repository has no commit history"
@@ -76,7 +76,7 @@ Ask for clarifications via `report to orchestrator`. For the full question templ
 1. **Project purpose** (if not clear from README): present the inferred description for confirmation, or report to the orchestrator to provide one
 2. **Target users**: developers, end users, or both — steers the PRD's framing
 3. **Project phase**: MVP / active development / maintenance / planning major changes — sets feature-vs-stability emphasis
-4. **Stakeholders**: scale (solo / small team / larger org / OSS community) → drives the depth of the PRD's stakeholder matrix (see [REFERENCE.md](REFERENCE.md#stakeholders--personas))
+4. **Stakeholders**: scale (solo / small team / larger org / OSS community) → drives the depth of the PRD's stakeholder matrix (see [REFERENCE.md](REFERENCE.md#prd-template))
 5. **Feature confirmation**: present {N} features extracted from git for review/prioritization
 6. **Architecture rationale**: for each identified decision, ask the main driver
 7. **Generation confirmation**: show the summary below and ask if ready to generate
@@ -640,7 +640,6 @@ PRPs: {N} future work items suggested
 **Next Steps**
 1. Review documents marked "needs clarification"
 2. Run `/blueprint:generate-rules` to create implementation patterns
-3. Run `/blueprint:generate-commands` for workflow automation
 ```
 
 
@@ -655,8 +654,6 @@ options:
     description: "Go through items marked 'needs clarification'"
   - label: "Generate project rules"
     description: "Run /blueprint:generate-rules from the new PRD"
-  - label: "Generate workflow commands"
-    description: "Run /blueprint:generate-commands for this project"
   - label: "I'm done for now"
     description: "Exit - documents are saved and ready for review"
 ```
@@ -664,7 +661,6 @@ options:
 **Based on selection**:
 - "Review and refine" - Show list of documents needing attention with file paths
 - "Generate project rules" - Run `/blueprint:generate-rules`
-- "Generate workflow commands" - Run `/blueprint:generate-commands`
 - "I'm done" - Exit with quick reference
 
 
