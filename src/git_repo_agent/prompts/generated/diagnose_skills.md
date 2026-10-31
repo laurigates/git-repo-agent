@@ -440,6 +440,26 @@ gh api repos/:owner/:repo/actions/runs/<run-id>/jobs \
 ```
 
 
+### Read job conclusions, not the workflow's
+
+A run's `conclusion: success` also covers jobs that were **skipped**. Jobs gated
+on a tag push or a release event (`if: github.event_name == 'push'`,
+`if: startsWith(github.ref, 'refs/tags/')`, release-please pre-release only)
+report `skipped` on every PR, so PR CI is green for them by construction. A
+change that breaks one merges cleanly and fails on the next release, which can
+be weeks later.
+
+```bash
+gh run view <run-id> --json jobs --jq '.jobs[] | {name, conclusion}'
+```
+
+- To judge whether a specific job (an image build, a release upload) actually
+  ran, read that job's `conclusion`. `skipped` means it verified nothing.
+- Before merging a change to a release-gated job, exercise it: trigger it with
+  `workflow_dispatch`, push a throwaway tag, or run the step locally (for
+  example `docker build --file <Dockerfile> .`).
+
+
 ### Check Workflow Timing
 
 ```bash
@@ -479,6 +499,7 @@ gh run list --limit 50 --json conclusion \
 | Dependency install | "Could not find package", "Version conflict" | Lock versions, use cache |
 | Environment | "Command not found", "Module not found" | Verify setup steps, check runner version |
 | Resource constraints | "out of disk space", "Process killed" | Clean artifacts, increase runner size |
+| Budget exhausted | Job `failure` with zero steps, `--log-failed` says `log not found`, every repo red at once | Read `gh api repos/<o>/<r>/check-runs/<job-id>/annotations`: "The job was not started because an Actions budget is preventing further use". Raise the budget; see `actions-billing-usage` § Budgets |
 
 
 ### gh run Commands
@@ -930,6 +951,113 @@ Systematic approach to finding and fixing bugs.
 | Flaky test | Timing, shared state | Test isolation |
 
 
+## Diagnose at the Failure Point — Sentinel Values and the Resource Reading
+
+Promoted from `~/.claude/rules/diagnose-at-the-failure-point.md`, whose stub
+keeps the two gate lines. When a tool or library reports a failure, two surface
+features routinely misdirect the diagnosis: the **named entity** in the error,
+and the **framing** you inherited going in. Both are cheap to check against
+reality at the exact point of failure.
+
+
+### 1. A named entity in an error may be a sentinel/default, not a real object
+
+An error that names something by a **low / zero / default identifier** —
+`Memory page 0 doesn't exist`, `id 0`, an empty-string name, `index -1`,
+`0.0.0.0`, a null UUID — is often reporting an **uninitialized or sentinel
+default**, not a real entity that misbehaved. **Before theorizing on the
+entity, verify its identifier came from a real success** (a completed
+allocation / lookup / registration), not a fallback path.
+
+> Canonical break (2026-07, cubecl CUDA): `couldn't find resource for that
+> handle: Memory page 0 doesn't exist` was read — by a handoff issue, the
+> upstream tracker, and me for many iterations — as a memory-pool *reclaim
+> race* corrupting "page 0". It was `MemoryLocation::uninit() = {pool:0,page:0}`:
+> a **failed allocation** left its handle unbound at the zero default, and every
+> downstream lookup of an unbound handle reported "page 0." **Zero** pool
+> reclaims had fired. The tell was mechanical: the count of distinct "missing"
+> handles equalled the count of allocation failures **exactly**.
+
+The tell is usually a **count or ratio that matches something upstream**
+(missing-entity count == failure count) — look for it before accepting the
+entity as real.
+
+
+### 2. For any exhaustion symptom, read the actual resource at the failure point
+
+`OOM` / `out of memory` / `can't allocate` / `ENOSPC` / `too many open files` /
+`pool exhausted` are **symptoms with three different fixes** — genuine
+exhaustion, fragmentation, or a manager/allocator bug — and one measurement at
+the failure point discriminates them:
+
+| Symptom | Read at the failure point | Genuine exhaustion iff |
+|---|---|---|
+| CUDA/GPU OOM | `cuMemGetInfo` (free, total) | free ≪ requested |
+| `ENOSPC` | `df` on the target fs | free ≈ 0 |
+| `EMFILE` / too many files | fd count vs `ulimit -n` | count ≈ limit |
+| allocator/pool "full" | pool `in_use` vs `reserved` vs device total | in_use ≈ device total |
+
+Instrument the *failing call site* to print this; don't infer it from a sampler
+taken seconds earlier (peak may be between samples). In the same case,
+`cuMemGetInfo` at the failing `malloc` showed **0.58 GB free of 25.2 GB** —
+genuinely full, not fragmented, not a pool bug. That one reading ended the
+allocator hunt: the working set simply exceeded the card. Every competing theory
+(reclaim race, cursor guard, sync-before-reclaim, a resolution "lever") had
+already died to a measurement, not an argument.
+
+**Evidence at the failure point > the framing you were handed > a plausible
+mechanism.** A confidently-written issue, a maintainer's stated root cause, and
+an error's own wording are all *inputs to verify*, not conclusions. When a
+theory and a measurement disagree, the measurement wins — re-diagnose, don't
+patch the theory. It bites when an error names an entity by a suspicious
+round/zero/default value, when the fix for a "resource exhausted" failure
+depends on *why*, and when an inherited handoff or upstream tracker already
+asserts a root cause. Skipping the one cheap reading trades a five-second
+`cuMemGetInfo`/`df`/count for a multi-iteration hunt down a mechanism that never
+occurred. Siblings: `agent-patterns-plugin:probe-input-integrity` (an id *you*
+invent), `git-plugin:git-issue-scoping` and `git-plugin:git-upstream-fix-check`
+(don't trust the inherited framing), `agent-patterns-plugin:tool-result-traps`
+(a well-formed output that silently doesn't match reality).
+
+
+## Slow but Not CPU-Bound — Find Where Threads Block
+
+When wall time grows while user time stays flat, or adding threads stops
+helping, the time is spent asleep, where an on-CPU profiler does not sample.
+Compare voluntary context switches against a control
+(`/usr/bin/time -f "%e %U %S vol=%w"`), sample `/proc/<pid>/task/*/wchan`
+for blocked threads (no root), take deep off-CPU stacks with bpftrace on
+`sched:sched_switch` (root), then confirm the lock by removing your own locks
+and by changing the suspected lock's count. Method, script and a worked XFS
+example: [references/blocking-diagnosis.md](references/blocking-diagnosis.md).
+
+
+## Debugging Questions
+
+When stuck, ask:
+1. What changed recently that could cause this?
+2. Does it happen in all environments or just one?
+3. Is the bug in my code or a dependency?
+4. What assumptions am I making that might be wrong?
+5. Can I write a minimal reproduction?
+
+
+## Effective Debugging Practices
+
+- **Targeted changes**: Form a hypothesis, change one thing at a time
+- **Use proper debuggers**: Step through code with breakpoints when possible
+- **Find root causes**: Trace issues to their origin, fix the source
+- **Reproduce first**: Create a minimal reproduction before attempting a fix
+- **Verify the fix**: Confirm the fix resolves the issue and passes tests
+
+For system-level tools (memory analysis, profiling, strace/eBPF tracing, network debugging) and language-specific debugger commands, see .
+
+
+# Debugging Methodology - Reference
+
+System-level tracing/profiling tools and language-specific debugger commands.
+
+
 ## System-Level Tools
 
 
@@ -1024,6 +1152,8 @@ sudo bpftrace -e 'uprobe:./myapp:main.handleRequest { printf("called\n"); }'
 - High-frequency syscalls
 - When you can't afford to slow down the process
 
+For off-CPU stacks (where threads sleep rather than run) and lock-queue diagnosis, see [references/blocking-diagnosis.md](references/blocking-diagnosis.md).
+
 
 ### Network Debugging
 ```bash
@@ -1075,22 +1205,3 @@ dbg!(&variable);
 // Backtrace on panic
 RUST_BACKTRACE=1 cargo run
 ```
-
-
-## Debugging Questions
-
-When stuck, ask:
-1. What changed recently that could cause this?
-2. Does it happen in all environments or just one?
-3. Is the bug in my code or a dependency?
-4. What assumptions am I making that might be wrong?
-5. Can I write a minimal reproduction?
-
-
-## Effective Debugging Practices
-
-- **Targeted changes**: Form a hypothesis, change one thing at a time
-- **Use proper debuggers**: Step through code with breakpoints when possible
-- **Find root causes**: Trace issues to their origin, fix the source
-- **Reproduce first**: Create a minimal reproduction before attempting a fix
-- **Verify the fix**: Confirm the fix resolves the issue and passes tests

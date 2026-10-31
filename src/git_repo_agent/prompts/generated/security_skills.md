@@ -25,7 +25,7 @@ bash "${CLAUDE_PLUGIN_ROOT}/skills/git-security-checks/scripts/security-scan.sh"
 bash "${CLAUDE_PLUGIN_ROOT}/skills/git-security-checks/scripts/security-scan.sh" --staged-only
 ```
 
-The script checks: gitleaks scan, sensitive file patterns, .gitignore coverage, high-entropy strings in diffs, and pre-commit hook status. See [scripts/security-scan.sh](scripts/security-scan.sh) for details.
+The script checks: gitleaks scan (`STATUS=inert_config` when `.gitleaks.toml` loads zero rules), sensitive file patterns, .gitignore coverage, high-entropy strings in diffs, and pre-commit hook status. See [scripts/security-scan.sh](scripts/security-scan.sh) for details.
 
 
 ## Gitleaks Workflow
@@ -59,7 +59,7 @@ gitleaks detect --source . --verbose
 
 ### Configuration
 
-Create `.gitleaks.toml` for project-specific allowlists:
+Create `.gitleaks.toml` for project-specific allowlists. Keep the `[extend]` block: gitleaks loads rules only from `[extend]` and `[[rules]]`, so a file with just an `[allowlist]` loads zero rules and every scan reports clean. `scripts/security-scan.sh` reports that as `CONFIG=inert`.
 
 ```toml
 title = "Gitleaks Configuration"
@@ -103,7 +103,7 @@ gitleaks detect --source . --config .gitleaks.toml
 
 ### Managing False Positives
 
-Gitleaks provides three declarative methods for handling false positives:
+Gitleaks provides declarative methods for handling false positives. Every `.gitleaks.toml` snippet in this section starts with the `[extend]` block from [Configuration](#configuration), because the file replaces the built-in ruleset rather than adding to it.
 
 **1. Inline comments** — mark specific lines:
 
@@ -120,6 +120,9 @@ password = "test-fixture"  # gitleaks:allow
 **2. Path-based exclusions** — in `.gitleaks.toml`:
 
 ```toml
+[extend]
+useDefault = true
+
 [allowlist]
 paths = [
     '''test/fixtures/.*''',
@@ -131,6 +134,9 @@ paths = [
 **3. Regex-based allowlists** — for specific patterns:
 
 ```toml
+[extend]
+useDefault = true
+
 [allowlist]
 regexes = [
     '''example\.com''',
@@ -142,6 +148,9 @@ regexes = [
 **4. Per-rule allowlists** — target specific detection rules:
 
 ```toml
+[extend]
+useDefault = true
+
 [[rules]]
 id = "generic-api-key"
 description = "Generic API Key"
@@ -219,6 +228,57 @@ pre-commit install
 ```
 
 
+### `--files` does not scope the gitleaks hook — stage first
+
+`pre-commit run gitleaks --files <path>` looks like a scoped scan and is not
+one. Upstream declares the hook `pass_filenames: false`, so the paths never
+reach it, and its entry scans `--staged`:
+
+```yaml
+
+# gitleaks/.pre-commit-hooks.yaml, v8.30.0
+- id: gitleaks
+  entry: gitleaks git --pre-commit --redact --staged --verbose
+  pass_filenames: false
+```
+
+In a clean worktree nothing is staged, so the command scans **zero bytes** and
+prints `Passed`. Measured on one file containing a real JWT, same command both
+times:
+
+| State of the file | Result |
+|---|---|
+| worktree only (`??`) | `Detect hardcoded secrets … Passed` — `0 commits scanned` |
+| `git add`-ed | `RuleID: jwt … leaks found: 1` |
+
+The failure direction is what makes this worth knowing: a `--files` invocation
+quoted as proof of a clean scan is a **false all-clear**, and it looks exactly
+like a real one. Always:
+
+```bash
+git add <paths>
+pre-commit run gitleaks
+```
+
+Two habits that generalise past gitleaks:
+
+- **Before trusting a hook's green, read its `pass_filenames` in the upstream
+  `.pre-commit-hooks.yaml` at the pinned `rev`.** A hook that ignores filenames
+  ignores your scoping flag too.
+- **Control-test the hook.** Put a known-bad value in a scratch file, stage it,
+  and confirm the hook goes red before believing that it went green. Choose the
+  bad value carefully — gitleaks does not flag AWS's own documented example key
+  (`wJalrXUtnFEMI…EXAMPLEKEY`), so a probe built from one passes and proves
+  nothing. A JWT or another high-entropy token works.
+
+For detection rule coverage, false-positive management, leak remediation, CI/CD integration, troubleshooting, and the complete gitleaks/pre-commit command reference, see .
+
+
+# Git Security Checks - Reference
+
+Detailed gitleaks patterns, false-positive management, leak remediation, CI/CD integration, troubleshooting, and the complete command reference.
+
+
 ## Common Secret Patterns
 
 Gitleaks ships with 140+ built-in rules covering:
@@ -258,9 +318,13 @@ MIIEpAIBAAKCAQEA...  # gitleaks:allow
 
 ### Excluding Files
 
-In `.gitleaks.toml`:
+In `.gitleaks.toml`, under the `[extend]` block that loads the default rules (an
+`[allowlist]` on its own loads zero rules):
 
 ```toml
+[extend]
+useDefault = true
+
 [allowlist]
 paths = [
     '''package-lock\.json$''',
@@ -431,11 +495,11 @@ jobs:
   security:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4.4.0
         with:
           fetch-depth: 0
       - name: Gitleaks
-        uses: gitleaks/gitleaks-action@v2
+        uses: gitleaks/gitleaks-action@v2.3.9
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 ```
@@ -572,16 +636,7 @@ Execute this security scanning configuration check:
 
 ### Step 1: Fetch latest tool versions
 
-Verify latest versions before configuring:
-
-1. **Trivy**: Check [GitHub releases](https://github.com/aquasecurity/trivy/releases)
-2. **Grype**: Check [GitHub releases](https://github.com/anchore/grype/releases)
-3. **gitleaks**: Check [GitHub releases](https://github.com/gitleaks/gitleaks/releases)
-4. **pip-audit**: Check [PyPI](https://pypi.org/project/pip-audit/)
-5. **cargo-audit**: Check [crates.io](https://crates.io/crates/cargo-audit)
-6. **CodeQL**: Check [GitHub releases](https://github.com/github/codeql-action/releases)
-
-Use WebSearch or WebFetch to verify current versions.
+Verify latest versions of Trivy, Grype, gitleaks, pip-audit, cargo-audit, and CodeQL with WebSearch or WebFetch before configuring. The release source for each tool is in [references/tool-versions.md](references/tool-versions.md).
 
 
 ### Step 2: Detect project languages and security posture
@@ -595,9 +650,24 @@ bash "${CLAUDE_SKILL_DIR}/scripts/configure-security.sh" --home-dir "$HOME" --pr
 ```
 
 Parse `STATUS=` and the `ISSUES:` block from the output. The `KEY=VALUE` lines
-report language detection (`LANG_JS`, `LANG_PYTHON`, `LANG_RUST`, `LANG_GO`) and
-the presence matrix (`DEPENDABOT`, `CODEQL`, `GITLEAKS_CONFIG`, `SECURITY_POLICY`,
-`TRUFFLEHOG`, `DEPENDENCY_REVIEW`, `SECURITY_LAYERS_PRESENT`).
+report language detection (`LANG_*`) and the per-layer presence matrix.
+
+`DEPENDENCY_AUTOMATION` is the layer verdict — true when **either** `RENOVATE` or
+`DEPENDABOT` is true. Read that key, not `DEPENDABOT` alone, when deciding
+whether the dependency layer needs work; the `missing_dependency_automation`
+warning is raised only when neither tool is configured.
+
+`CODEQL_AVAILABLE` (`yes`/`no`/`unknown`) says whether CodeQL can run here at all
+and gates the severity of a missing SAST layer: `yes` → WARN `missing_sast`,
+`no` → INFO `sast_unavailable`, `unknown` → provisional WARN. The full key list,
+the availability table with every `CODEQL_AVAILABILITY_REASON` value, and the
+probe's opt-out/timeout env vars are in
+[references/detection-output.md](references/detection-output.md) — read it when
+interpreting an unexpected key or reason.
+
+`GITLEAKS_RULES` is the secret-detection verdict, not `GITLEAKS_CONFIG`: `none`
+means `.gitleaks.toml` exists but loads zero rules (`inert_secret_detection`), so
+every gitleaks scan reading it reports no leaks.
 
 
 ### Step 3: Generate compliance report
@@ -609,13 +679,20 @@ If `--check-only` is set, stop here.
 For the compliance report format, see .
 
 
-### Step 4: Configure dependency auditing (if --fix or user confirms)
+### Step 4: Configure dependency automation (if --fix or user confirms)
+
+**First, check the incumbent.** If `DEPENDENCY_AUTOMATION=true`, a dependency
+bot already runs here — leave it alone and skip to the audit-script and
+dependency-review items below. Renovate and Dependabot both open update PRs and
+both rewrite lockfiles, so adding the second one makes them race each other on
+every update; never configure Dependabot on a repo where `RENOVATE=true` (or the
+reverse). Only when `DEPENDENCY_AUTOMATION=false` do you pick one and install it.
 
 Based on detected language:
 
 **JavaScript/TypeScript (npm/bun):**
 1. Add audit scripts to `package.json`
-2. Create Dependabot config `.github/dependabot.yml`
+2. If no bot is configured yet, create one — Dependabot config `.github/dependabot.yml`, or a Renovate config (`renovate.json`)
 3. Create dependency review workflow `.github/workflows/dependency-review.yml`
 
 **Python (pip-audit):**
@@ -631,6 +708,17 @@ For complete configuration templates, see .
 
 ### Step 5: Configure SAST scanning (if --fix or user confirms)
 
+**First, check that CodeQL can run here.** If `CODEQL_AVAILABLE=no`, do not write
+a CodeQL workflow and do not offer to — with code security off, every
+`github/codeql-action/*` step fails with HTTP 403, so its only fix is deletion.
+Report the layer as unavailable (quoting `CODEQL_AVAILABILITY_REASON`) and give
+both routes: enabling code scanning in the repository's security settings, which
+works only where the plan covers it, or SARIF-free coverage — a standalone Trivy
+or Semgrep scan writing to the job log or a PR comment rather than the security
+tab, plus Bandit below.
+
+Otherwise:
+
 1. Create CodeQL workflow `.github/workflows/codeql.yml` with detected languages
 2. For Python projects, install and configure Bandit
 3. Run Bandit: `uv run bandit -r src/ -f json -o bandit-report.json`
@@ -641,7 +729,7 @@ For CodeQL workflow and Bandit configuration templates, see .
 ### Step 6: Configure secret detection (if --fix or user confirms)
 
 1. Install gitleaks: `brew install gitleaks` (or `go install github.com/gitleaks/gitleaks/v8@latest`)
-2. Create `.gitleaks.toml` with project-specific allowlists
+2. Create `.gitleaks.toml` that starts with `[extend] useDefault = true`, then add project-specific allowlists. On `GITLEAKS_RULES=none`, add that block to the existing file
 3. Run initial scan: `gitleaks detect --source .`
 4. Add pre-commit hook to `.pre-commit-config.yaml`
 5. Optionally configure TruffleHog workflow for CI
@@ -676,7 +764,7 @@ exact block, see .
 
 ### Step 10: Report configuration results
 
-Print a summary of all changes made across dependency auditing, SAST scanning, secret detection, security policy, and CI/CD integration. Include next steps for reviewing Dependabot PRs, CodeQL findings, and enabling private vulnerability reporting.
+Print a summary of all changes made across dependency automation, SAST scanning, secret detection, security policy, and CI/CD integration. Include next steps for reviewing dependency-update PRs (Renovate or Dependabot, whichever this repo runs), CodeQL findings, and enabling private vulnerability reporting.
 
 For the results report format, see .
 
@@ -687,6 +775,7 @@ For the results report format, see .
 - **GitHub Actions not available**: Warn about CI limitations
 - **Secrets found in history**: Provide remediation guide
 - **CodeQL unsupported language**: Skip SAST for that language
+- **`CODEQL_AVAILABLE=no`**: Code security is off for this repo — report SAST as unavailable and offer both the settings toggle and a SARIF-free scanner; never write a CodeQL workflow that would 403
 
 
 # configure-security Reference
@@ -704,7 +793,9 @@ components:
   security_sast: true
   security_secret_detection: true
   security_policy: true
-  security_dependabot: true
+  # Record whichever dependency-update bot the repo actually runs. Renovate and
+  # Dependabot are alternatives, never both (#2495) — set one, not the pair.
+  security_dependabot: true    # or: security_renovate: true
 ```
 
 
@@ -716,9 +807,9 @@ Security Scanning Compliance Report
 Project: [name]
 Languages: [TypeScript, Python]
 
-Dependency Auditing:
+Dependency Automation:
+  Update bot              Renovate                   [RENOVATE | DEPENDABOT | NONE]
   npm audit               configured                 [CONFIGURED | MISSING]
-  Dependabot              enabled                    [ENABLED | DISABLED]
   Dependency review       .github/workflows/         [CONFIGURED | MISSING]
   Audit scripts           package.json               [CONFIGURED | MISSING]
   Auto-merge              configured                 [OPTIONAL | MISSING]
@@ -730,7 +821,7 @@ SAST Scanning:
   Bandit (Python)         configured                 [CONFIGURED | MISSING]
 
 Secret Detection:
-  Gitleaks                .gitleaks.toml             [CONFIGURED | MISSING]
+  Gitleaks                .gitleaks.toml             [CONFIGURED | INERT | MISSING]
   Pre-commit hook         .pre-commit-config.yaml    [CONFIGURED | MISSING]
   TruffleHog              .github/workflows/         [OPTIONAL | MISSING]
   Git history scanned     clean                      [CLEAN | SECRETS FOUND]
@@ -743,14 +834,21 @@ Security Policies:
 Overall: [X issues found]
 
 Recommendations:
-  - Enable Dependabot for automated dependency updates
+  - Enable a dependency-update bot (Renovate or Dependabot) — omit this line when one already runs
   - Add CodeQL workflow for SAST scanning
   - Scan git history for leaked secrets
   - Create SECURITY.md for responsible disclosure
 ```
 
 
-## Dependency Auditing Templates
+## Dependency Automation Templates
+
+> **Apply the update-bot template only when the repo has neither bot** — i.e.
+> when the detection script reports `DEPENDENCY_AUTOMATION=false`. Renovate and
+> Dependabot both open update PRs and both rewrite lockfiles, so installing the
+> second one on top of an incumbent makes them race each other (#2495). When
+> `RENOVATE=true`, configure the audit scripts and dependency-review workflow
+> below and leave the update bot as it is.
 
 
 ### npm Audit Scripts (package.json)
@@ -767,6 +865,9 @@ Recommendations:
 
 
 ### Dependabot Config (`.github/dependabot.yml`)
+
+Use this **only** when the repo runs no update bot yet. A repo already on
+Renovate needs no change here.
 
 ```yaml
 version: 2
@@ -821,7 +922,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v6.1.0
 
       - name: Dependency Review
         uses: actions/dependency-review-action@v5
@@ -892,19 +993,19 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v6.1.0
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@v4
+        uses: github/codeql-action/init@v4.39.1
         with:
           languages: ${{ matrix.language }}
           queries: +security-extended,security-and-quality
 
       - name: Autobuild
-        uses: github/codeql-action/autobuild@v4
+        uses: github/codeql-action/autobuild@v4.39.1
 
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@v4
+        uses: github/codeql-action/analyze@v4.39.1
         with:
           category: "/language:${{ matrix.language }}"
 ```
@@ -1023,7 +1124,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v6.1.0
         with:
           fetch-depth: 0  # Full history for scanning
 
@@ -1038,6 +1139,10 @@ jobs:
 
 
 ### Gitleaks Configuration (`.gitleaks.toml`)
+
+Keep the `[extend]` block. Without it, or a `[[rules]]` table, gitleaks loads zero
+rules and reports no leaks on every scan; the detection script reports that as
+`GITLEAKS_RULES=none` (INERT in the compliance report).
 
 ```toml
 title = "Gitleaks Configuration"
@@ -1070,7 +1175,7 @@ jobs:
   scan:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v6.1.0
         with:
           fetch-depth: 0
 
@@ -1153,7 +1258,7 @@ We take the security of our project seriously. If you believe you've found a sec
 
 This project uses:
 
-- **Dependabot**: Automated dependency updates
+- **Renovate** *or* **Dependabot**: Automated dependency updates (name the one this repo runs)
 - **CodeQL**: Static application security testing
 - **Gitleaks**: Pre-commit secret scanning
 - **TruffleHog**: Git history secret scanning
@@ -1196,10 +1301,10 @@ jobs:
     name: Dependency Audit
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v6.1.0
 
       - name: Setup Node
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v6.5.0
         with:
           node-version: '22'
 
@@ -1211,7 +1316,7 @@ jobs:
     name: Secret Scanning
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v6.1.0
         with:
           fetch-depth: 0
 
@@ -1226,18 +1331,18 @@ jobs:
     name: SAST Scan
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v6.1.0
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@v4
+        uses: github/codeql-action/init@v4.39.1
         with:
           languages: javascript, python
 
       - name: Autobuild
-        uses: github/codeql-action/autobuild@v4
+        uses: github/codeql-action/autobuild@v4.39.1
 
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@v4
+        uses: github/codeql-action/analyze@v4.39.1
 ```
 
 
@@ -1247,9 +1352,9 @@ jobs:
 Security Scanning Configuration Complete
 =========================================
 
-Dependency Auditing:
+Dependency Automation:
   npm audit scripts configured
-  Dependabot enabled
+  Update bot: Renovate (already configured — left unchanged)
   Dependency review workflow added
   Auto-grouping configured
 
@@ -1275,7 +1380,7 @@ CI/CD Integration:
   All scans integrated
 
 Next Steps:
-  1. Review and approve Dependabot PRs:
+  1. Review and approve dependency-update PRs (Renovate or Dependabot):
      GitHub > Pull Requests > Filter by "dependencies"
 
   2. Review CodeQL findings:
@@ -1320,7 +1425,7 @@ Documentation: SECURITY.md
 
 ### Anthropic Direct API
 ```yaml
-- uses: anthropics/claude-code-action@v1
+- uses: anthropics/claude-code-action@v1.0.264
   with:
     anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
 ```
@@ -1334,12 +1439,12 @@ Documentation: SECURITY.md
 
 ### AWS Bedrock
 ```yaml
-- uses: aws-actions/configure-aws-credentials@v4
+- uses: aws-actions/configure-aws-credentials@v4.3.1
   with:
     role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
     aws-region: us-east-1
 
-- uses: anthropics/claude-code-action@v1
+- uses: anthropics/claude-code-action@v1.0.264
   with:
     claude_args: --bedrock-region us-east-1
 ```
@@ -1370,11 +1475,11 @@ Documentation: SECURITY.md
 
 ### Google Vertex AI
 ```yaml
-- uses: google-github-actions/auth@v2
+- uses: google-github-actions/auth@v2.1.13
   with:
     credentials_json: ${{ secrets.GCP_CREDENTIALS }}
 
-- uses: anthropics/claude-code-action@v1
+- uses: anthropics/claude-code-action@v1.0.264
   with:
     claude_args: |
       --vertex-project-id ${{ secrets.GCP_PROJECT_ID }}
@@ -1417,13 +1522,13 @@ roles/aiplatform.user
 ```yaml
 
 # WRONG - Never hardcode!
-- uses: anthropics/claude-code-action@v1
+- uses: anthropics/claude-code-action@v1.0.264
   with:
     anthropic_api_key: "sk-ant-api03-..."  # gitleaks:allow
 
 
 # CORRECT - Always use secrets
-- uses: anthropics/claude-code-action@v1
+- uses: anthropics/claude-code-action@v1.0.264
   with:
     anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
 ```
@@ -1500,36 +1605,6 @@ permissions:
 permissions:
   contents: read         # Read-only access
   pull-requests: write   # Comments only, no commits
-```
-
-
-### Commit Security
-
-**Automatic Commit Signing**:
-```yaml
-
-# Commits are automatically signed by Claude Code
-permissions:
-  contents: write  # Enables signed commits
-
-
-# Verify commit signature
-- run: git verify-commit HEAD
-```
-
-**Commit Verification**:
-```bash
-
-# Check commit signature
-git log --show-signature
-
-
-# Verify specific commit
-git verify-commit <commit-sha>
-
-
-# Check author
-git log --format='%an <%ae>' HEAD^..HEAD
 ```
 
 
@@ -1640,6 +1715,93 @@ See `.claude/rules/github-actions-security.md` for the full `pull_request_target
 guidance and the rest of the secure-use checklist.
 
 
+### Authentication Setup Commands
+
+```bash
+
+# Anthropic API
+gh secret set ANTHROPIC_API_KEY
+
+
+# AWS Bedrock
+gh secret set AWS_ROLE_ARN
+
+
+# Google Vertex AI
+gh secret set GCP_CREDENTIALS
+gh secret set GCP_PROJECT_ID
+```
+
+
+### Security Validation
+
+```bash
+
+# Validate workflow syntax
+actionlint .github/workflows/claude.yml
+
+
+# Check for hardcoded secrets
+git secrets --scan
+
+
+# Audit permissions
+yq '.jobs.*.permissions' .github/workflows/claude.yml
+
+
+# Verify commit signatures
+git verify-commit HEAD
+```
+
+
+### Required Secrets
+
+| Authentication | Required Secrets | Optional |
+|----------------|------------------|----------|
+| Anthropic API | `ANTHROPIC_API_KEY` | - |
+| AWS Bedrock | `AWS_ROLE_ARN` | `AWS_REGION` |
+| Vertex AI | `GCP_CREDENTIALS`, `GCP_PROJECT_ID` | `VERTEX_REGION` |
+
+For commit-signature verification, the full security checklist (including CODEOWNERS guidance), and per-provider troubleshooting, see .
+
+For workflow design patterns, see the claude-code-github-workflows skill. For MCP server configuration, see the github-actions-mcp-config skill.
+
+
+# GitHub Actions Authentication and Security - Reference
+
+Commit-security verification, the full pre-deployment/monitoring/incident-response checklist, and per-provider troubleshooting for Claude Code GitHub Actions workflows.
+
+
+## Commit Security
+
+**Automatic Commit Signing**:
+```yaml
+
+# Commits are automatically signed by Claude Code
+permissions:
+  contents: write  # Enables signed commits
+
+
+# Verify commit signature
+- run: git verify-commit HEAD
+```
+
+**Commit Verification**:
+```bash
+
+# Check commit signature
+git log --show-signature
+
+
+# Verify specific commit
+git verify-commit <commit-sha>
+
+
+# Check author
+git log --format='%an <%ae>' HEAD^..HEAD
+```
+
+
 ## Security Checklist
 
 
@@ -1649,11 +1811,30 @@ guidance and the rest of the secure-use checklist.
 - [ ] Repo default `GITHUB_TOKEN` permission set to read-only
 - [ ] Untrusted run-context values pass through an `env:` var (no `${{ … }}` in `run:`)
 - [ ] Third-party actions SHA-pinned (Renovate-managed — see `version-pinning.md`)
-- [ ] `/.github/workflows/` listed in `.github/CODEOWNERS`
+- [ ] `/.github/workflows/` listed in `.github/CODEOWNERS` (ownership + auto-requested review; see [§ CODEOWNERS: ownership vs. enforcement](#codeowners-ownership-vs-enforcement) before making it a merge gate)
 - [ ] Actions blocked from creating/approving PRs unless a workflow needs it
 - [ ] Input validation implemented
 - [ ] Branch protection rules enabled
 - [ ] Security scanning enabled
+
+#### CODEOWNERS: ownership vs. enforcement
+
+`.github/CODEOWNERS` alone names an owner per path and makes GitHub
+auto-request their review — pure upside, enable it anywhere. Turning it into a
+merge **gate** is a separate branch-protection setting, "Require review from
+Code Owners", and that one needs a look at who the owners are first.
+
+**GitHub does not count a PR author's own approval toward the code-owner
+requirement.** So on a repo where the listed owner is also the author of nearly
+every PR touching those paths — a solo maintainer, or a path only one
+team member ever edits — enabling it means each of those PRs needs a second
+reviewer who does not exist, or an admin bypass on every merge. The setting
+stops being a review aid and becomes a merge block.
+
+Enable it when the owner list contains someone other than the usual author (a
+second maintainer, or a bot account that can approve); leave it off when it does
+not, and record that as a decision rather than an oversight. Either way the
+CODEOWNERS file keeps earning its place.
 
 
 ### Monitoring
@@ -1693,10 +1874,15 @@ anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
 
 
 # Test API key locally
+
+# Any current model ID works here (cheapest: claude-haiku-4-5); a retired ID
+
+# returns not_found and looks like a bad key
 curl https://api.anthropic.com/v1/messages \
   -H "x-api-key: $ANTHROPIC_API_KEY" \
   -H "anthropic-version: 2023-06-01" \
-  -d '{"model":"claude-3-5-sonnet-20241022","max_tokens":10,"messages":[{"role":"user","content":"test"}]}'
+  -H "content-type: application/json" \
+  -d '{"model":"claude-haiku-4-5","max_tokens":10,"messages":[{"role":"user","content":"test"}]}'
 ```
 
 
@@ -1753,53 +1939,3 @@ gcloud projects get-iam-policy $GCP_PROJECT_ID
 # Test Vertex AI access
 gcloud ai models list --region=us-central1
 ```
-
-
-### Authentication Setup Commands
-
-```bash
-
-# Anthropic API
-gh secret set ANTHROPIC_API_KEY
-
-
-# AWS Bedrock
-gh secret set AWS_ROLE_ARN
-
-
-# Google Vertex AI
-gh secret set GCP_CREDENTIALS
-gh secret set GCP_PROJECT_ID
-```
-
-
-### Security Validation
-
-```bash
-
-# Validate workflow syntax
-actionlint .github/workflows/claude.yml
-
-
-# Check for hardcoded secrets
-git secrets --scan
-
-
-# Audit permissions
-yq '.jobs.*.permissions' .github/workflows/claude.yml
-
-
-# Verify commit signatures
-git verify-commit HEAD
-```
-
-
-### Required Secrets
-
-| Authentication | Required Secrets | Optional |
-|----------------|------------------|----------|
-| Anthropic API | `ANTHROPIC_API_KEY` | - |
-| AWS Bedrock | `AWS_ROLE_ARN` | `AWS_REGION` |
-| Vertex AI | `GCP_CREDENTIALS`, `GCP_PROJECT_ID` | `VERTEX_REGION` |
-
-For workflow design patterns, see the claude-code-github-workflows skill. For MCP server configuration, see the github-actions-mcp-config skill.
