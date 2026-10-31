@@ -4,7 +4,7 @@
 
 **Delegate this task to the `test-runner` agent.**
 
-Use the Agent tool with `subagent_type: test-runner` to run tests with the appropriate framework. Pass all the context gathered above and the parsed parameters to the agent.
+Use the Agent tool with `subagent_type: testing-plugin:test-runner` to run tests with the appropriate framework. Pass all the context gathered in [Context](#context) and the parsed parameters to the agent.
 
 The test-runner agent should:
 
@@ -41,7 +41,7 @@ The test-runner agent should:
    - If slow: optimization suggestions
 
 Provide the agent with:
-- All context from the section above
+- All context from [Context](#context)
 - The parsed parameters (pattern, --coverage, --watch)
 - Any specific test configuration detected
 
@@ -73,6 +73,7 @@ The agent has expertise in:
    - Check cache directories
    - Parse last run timestamp
    - Extract pass/fail counts
+   - If no cache location exists, report `no data` (see [Output Format](#output-format)) and stop
 
 2. **Coverage Summary** (if --coverage):
    - Read coverage reports
@@ -92,26 +93,40 @@ The agent has expertise in:
 
 ## Output Format
 
+Fill every `<...>` slot from a file you actually read in Behavior step 1. A
+slot with no backing file is reported as `no data`; never estimate or carry over
+a number.
+
+**When no cached results exist** (none of the locations in
+[Cached Result Locations](#cached-result-locations) is present), print only:
+
 ```
 
-## Test Status (last run: 5 minutes ago)
+## Test Status: no data
 
-| Tier        | Passed | Failed | Skipped |
-|-------------|--------|--------|---------|
-| Unit        | 45     | 2      | 0       |
-| Integration | 12     | 0      | 1       |
-| E2E         | 8      | 1      | 0       |
+No cached test results found (checked: <locations checked>).
+Run `/test:quick` to produce results.
+```
 
-**Coverage**: 78% (target: 80%)
+Otherwise:
+
+```
+
+## Test Status (last run: <timestamp from the result file>)
+
+| Tier        | Passed   | Failed   | Skipped   |
+|-------------|----------|----------|-----------|
+| <tier>      | <passed> | <failed> | <skipped> |
+
+**Coverage**: <percent from the coverage report, or "no data"> (target: <target, if configured>)
 
 
 ### Recent Failures
-- test_user_validation: AssertionError (tests/test_user.py:42)
-- e2e/login.spec.ts: Timeout (line 15)
+- <test id>: <error type> (<file>:<line>)
 
 
 ### Flaky Tests (if --flaky)
-- test_async_handler: 3 failures in last 10 runs
+- <test id>: <failures> failures in last <runs> runs
 
 
 ### Suggested Actions
@@ -263,7 +278,7 @@ This skill auto-activates when:
 
 # Test Analysis and Fix Planning
 
-Analyzes test results from any testing framework, uses Zen planner to create a systematic fix strategy, and delegates fixes to appropriate subagents.
+Analyzes test results from any testing framework, uses PAL planner to create a systematic fix strategy, and delegates fixes to appropriate subagents.
 
 
 ## Usage
@@ -271,50 +286,6 @@ Analyzes test results from any testing framework, uses Zen planner to create a s
 ```bash
 /test:analyze <results-path> [--type <test-type>] [--focus <area>]
 ```
-
-
-## Examples
-
-```bash
-
-# Analyze Playwright accessibility test results
-/test:analyze ./test-results/ --type accessibility
-
-
-# Analyze unit test failures with focus on auth
-/test:analyze ./coverage/junit.xml --type unit --focus authentication
-
-
-# Auto-detect test type and analyze all issues
-/test:analyze ./test-output/
-
-
-# Analyze security scan results
-/test:analyze ./security-report.json --type security
-```
-
-
-## Command Flow
-
-1. **Analyze Test Results**
-   - Parse test result files (XML, JSON, HTML, text)
-   - Extract failures, errors, warnings
-   - Categorize issues by type and severity
-   - Identify patterns and root causes
-
-2. **Plan Fixes with PAL Planner**
-   - Use `mcp__pal__planner` for systematic planning
-   - Break down complex fixes into actionable steps
-   - Identify dependencies between fixes
-   - Estimate effort and priority
-
-3. **Delegate to Subagents**
-   - Route each issue category through the [Subagent Routing](#subagent-routing) table below — it is the single source of truth for every `subagent_type` this skill dispatches.
-
-4. **Execute Plan**
-   - Sequential execution based on dependencies
-   - Verification after each fix
-   - Re-run tests to confirm resolution
 
 
 ## Subagent Routing
@@ -342,7 +313,9 @@ not a script to run verbatim.** Read it, then rewrite it for the work in front o
 
 **Adapt freely:** the agent prompts, the severity vocabulary, the result-file globs and
 format hints for your test framework, the `--focus` weighting, and the verification
-command each plan agent is told to emit.
+command each plan agent is told to emit. The parse stage runs on
+`agents-plugin:lean-reader` (Haiku 5.5, no CLAUDE.md, Read/Grep/Glob only), so its
+brief must carry everything it needs. Without `agents-plugin`, drop its `agentType`.
 
 **Preserve across any adaptation:** (a) the fan-out width comes from the `AGENT_FOR`
 table above — one agent per *agent type*, never a prose "for each failure", which is what
@@ -351,6 +324,10 @@ caps the harness at 8 concurrent agents; (b) the `category` and `severity` enums
 `unroutable[]` with a stated reason instead of the nearest-looking row; (c) the
 `parallel()` barrier before Synthesize — group agents emit `depends_on` edges pointing at
 failures in *other* groups, so the ordering only exists once every group has returned.
+
+**Agent budget:** 2 + agent types — parse and synthesize, plus one planning agent
+per routed agent type (at most 8, the `AGENT_FOR` table). The scale guard asks
+before every run, because the groups are derived from the parsed failures.
 
 **Skip the harness when:** there are fewer than 5 routable failures — the script returns
 `{mode:'inline'}` at that floor, because below it one opus agent per category costs more
@@ -364,55 +341,14 @@ Two consequences worth stating inline:
   tools, so the dependency edges in the merged plan are *inferred by the group agents*,
   not planned. A run that genuinely needs PAL planning (Step 2 below) should stay inline.
 - **`context: fork` stays, and it is not what justifies the harness.** The pin lives in
-  `scripts/plugin-compliance-check.sh` (the `context: fork` guard list, currently around
-  lines 898–914) and is unchanged by this template. Per
+  `scripts/plugin-compliance-check.sh` (the `for fork_skill in` loop inside
+  `check_skill_body()` — cited by name, because a line number in that file drifts every
+  time a regression guard is inserted) and is unchanged by this template. Per
   `.claude/rules/workflow-vs-skill.md` § "The `context: fork` corollary", fork already
   bought context isolation for free — so this harness has to earn its tokens by
   **splitting** the planning work across agent types behind a real barrier, which it does.
   The `parallel()` width is capped at the fixed agent-type set (8) precisely so it does
   not become the wide fan-out `.claude/rules/skill-fork-context.md` warns about.
-
-
-## Output
-
-The command produces:
-
-1. **Summary Report**
-   - Total issues found
-   - Breakdown by category/severity
-   - Top priorities
-
-2. **Fix Plan** (from PAL planner)
-   - Step-by-step remediation strategy
-   - Dependency graph
-   - Effort estimates
-
-3. **Subagent Assignments**
-   - Which agent handles which issues
-   - Rationale for delegation
-   - Execution order
-
-4. **Actionable Next Steps**
-   - Commands to run
-   - Files to modify
-   - Verification steps
-
-
-## Notes
-
-- Works with any test framework that produces structured output
-- Auto-detects common test result formats (JUnit XML, JSON, TAP)
-- Preserves test evidence for debugging
-- Can be chained with `/git:smartcommit` for automated fixes
-- Respects TDD workflow (RED → GREEN → REFACTOR)
-
-
-## Related Commands
-
-- `/test:run` - Run tests with framework detection
-- `/code:review` - Manual code review for test files
-- `/docs:update` - Update test documentation
-- `/git:smartcommit` - Commit fixes with conventional messages
 
 ---
 
@@ -440,7 +376,7 @@ Read the test result files from `<results-path>` and extract:
 
 **Step 2: Use PAL Planner**
 
-Call `mcp__pal__planner` with model "gemini-2.5-pro" to create a systematic fix plan:
+Call `mcp__pal__planner` (no model call; omit `model`) to create a systematic fix plan:
 - Step 1: Summarize findings and identify root causes
 - Step 2: Prioritize issues (impact × effort matrix)
 - Step 3: Break down fixes into actionable tasks
@@ -486,7 +422,9 @@ do not invent a focus.
 3. Refactor for quality
 4. Re-run tests to confirm
 
-Do you want me to proceed with the analysis and planning, or would you like to review the plan first?
+Proceed with the analysis and planning now — this skill runs `context: fork`
+and cannot wait for a reply. Present the completed Step 5 summary as the
+deliverable; the caller reviews the plan after the fact, not before it.
 
 ---
 
@@ -519,6 +457,7 @@ Expert knowledge for analyzing and improving test quality - detecting test smell
 | **Slow tests** | Suite > 10s for unit tests | `beforeAll()` for expensive setup; parallelize |
 | **Poor assertions** | `toBeDefined()`, no assertions, mock-only assertions | Specific matchers; assert outputs and state |
 | **Insufficient coverage** | Critical paths untested | 80%+ on business logic; test error paths and boundaries |
+| **Real user environment** | Test spawns git/CLIs or touches config with the developer's `HOME` | Temp `HOME` + `XDG_*_HOME` + `GIT_CONFIG_GLOBAL`; see [Tests That Reach the Real User Environment](#tests-that-reach-the-real-user-environment) |
 
 
 ## Analysis Tools
@@ -595,6 +534,46 @@ describe('calculateDiscount', () => {
   it('no coupon', () => expect(calculateDiscount(100)).toBe(100))
 })
 ```
+
+
+### Tests That Reach the Real User Environment
+
+A test that spawns `git`, `gh`, or any CLI with a login, or that reads or writes config, credentials or tokens, inherits the developer's real home directory. A cleanup or logout step in such a test can delete the live login. Point every user-level location at a temp dir before the first spawn:
+
+| Variable | Why |
+|----------|-----|
+| `HOME` | `~`, `os.homedir()` (Node) and `Path.home()` resolve from it on POSIX |
+| `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME`, `XDG_CACHE_HOME` | An exported value is an absolute path and survives a `HOME` change. git reads `$XDG_CONFIG_HOME/git/config`; `gh` keeps `hosts.yml` under it. With `XDG_CONFIG_HOME=~/.config` exported, `HOME=$(mktemp -d) gh auth status` still lists the real account |
+| `GIT_CONFIG_GLOBAL` | Replaces both global files (`~/.gitconfig` and the XDG one). Point it at a file in the temp dir so `git config --global` writes land there |
+| `GIT_CONFIG_NOSYSTEM=1` | Skips the system-level config |
+
+Also unset the `GIT_DIR` family, which overrides `git -C <sandbox>` — see [issue #1745](https://github.com/laurigates/claude-plugins/issues/1745) for the list and why a partial unset is not enough. OS keychains (macOS Keychain, `gh`'s `keyring` store) live outside `HOME`, so a test of login or logout must stub the CLI or credential helper rather than call it.
+
+```python
+
+# conftest.py
+@pytest.fixture(autouse=True)
+def isolated_home(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    for xdg, sub in [("CONFIG", ".config"), ("DATA", ".local/share"),
+                     ("STATE", ".local/state"), ("CACHE", ".cache")]:
+        monkeypatch.setenv(f"XDG_{xdg}_HOME", str(home / sub))
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(home / ".gitconfig"))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    for var in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
+                "GIT_COMMON_DIR", "GIT_NAMESPACE", "GIT_PREFIX"):
+        monkeypatch.delenv(var, raising=False)
+```
+
+`monkeypatch` edits `os.environ`, so `subprocess` children inherit it. A path computed at import time (`CONFIG = Path.home() / ".tool"` at module level) was resolved before the fixture ran; patch that constant too, or resolve it lazily.
+
+| Runner | Idiom |
+|--------|-------|
+| Vitest | `vi.stubEnv('HOME', dir)` (and the rest; `vi.stubEnv(name, undefined)` unsets) inside `beforeEach` in a `setupFiles` module. With `unstubEnvs: true` stubs are restored before every test, so a top-level stub would not persist |
+| Bun | Set the variables outside the process (`HOME=$(mktemp -d) bun test`, or in the `package.json` / `justfile` recipe). In Bun 1.4.3, assigning `process.env.HOME` at runtime does not change `os.homedir()` or the default env of `Bun.spawn`; only `node:child_process` sees it |
+| Shell | `TEST_HOME=$(mktemp -d) \|\| exit 1`, then export `HOME`, the four `XDG_*_HOME` variables, `GIT_CONFIG_GLOBAL` and `GIT_CONFIG_NOSYSTEM=1`, and `unset` the `GIT_DIR` family before the first git command. The `\|\| exit 1` guards the empty-`mktemp` case (#1692) |
 
 
 ## Test Structure (AAA Pattern)
