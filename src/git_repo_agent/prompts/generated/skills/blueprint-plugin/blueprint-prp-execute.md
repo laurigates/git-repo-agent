@@ -21,12 +21,15 @@ Execute the complete PRP implementation workflow:
 1. Read PRP file: `docs/prps/{prp-name}.md`
 2. Extract confidence score from frontmatter
 3. If confidence < 7 → Error: "PRP confidence too low. Run `/blueprint:prp-create {prp-name}` to refine"
-4. If confidence >= 9 → Offer delegation: "This PRP has high confidence. Execute now (current session) or create work-order for delegation?"
+4. **Check content quality with a fresh reader** (issue #3002). The confidence score and the structural hook (`check-prp-readiness.sh`) do not judge whether the content can be implemented, and the agent about to execute the PRP has a stake in calling it ready (`.claude/rules/loop-integrity.md` Pillar 1). Dispatch one `Task` agent (`subagent_type: general-purpose`) and give it only the PRP file path and the reader prompt in [REFERENCE.md](REFERENCE.md#prp-content-quality-check): no session context, no plan. It judges specific requirements, testable acceptance criteria, edge cases, and bounded scope, and returns a JSON verdict.
+   - `{"ok": true}` → continue
+   - `{"ok": false, "reason": ...}` → stop before any execution or delegation, print the reason, and suggest `/blueprint:prp-create {prp-name}` to refine the PRP
+5. If confidence >= 9 → Offer delegation: "This PRP has high confidence. Execute now (current session) or create work-order for delegation?"
    - If work-order chosen → Run `/blueprint:work-order --from-prp {prp-name}` and exit
    - If delegation to multiple subagents chosen → Create focused work-orders per module from Implementation Blueprint and exit
-5. Continue to Step 2 if executing now OR confidence 7-8
-6. Load all referenced curated rule entries (`.claude/rules/`) for context
-7. Parse Implementation Blueprint and create TodoWrite entries ordered by dependencies
+6. Continue to Step 2 if executing now OR confidence 7-8
+7. Load all referenced curated rule entries (`.claude/rules/`) for context
+8. Parse the Implementation Blueprint into an ordered task checklist (dependencies first); track it with `TodoWrite` when the session has the task tools, otherwise carry it as a checklist in the response (see `.claude/rules/agentic-permissions.md` § Task-tool availability)
 
 
 ### Step 2: Establish baseline with validation gates
@@ -60,10 +63,15 @@ For each task in Implementation Blueprint:
    - Extract common patterns
    - Improve naming, add type hints
    - Follow project conventions
+   - Stay inside the task's files and the PRP task list. A pre-existing bug or
+     unrelated cleanup you notice is not part of this change — record it as a
+     deferred item in Step 5 (a GitHub issue if it is Blocked or Phase 2,
+     otherwise Nice-to-Have). Do not commit scratch or exploratory tests.
    - Run tests → Confirm PASS
    - Run validation gates frequently (not just at end)
 
-4. **Mark progress**: Update TodoWrite: `✅ Task N: [Description]`
+4. **Mark progress**: once the task's tests pass, tick `Task N` in the checklist
+   from Step 1 (via `TodoWrite` when the task tools are present).
 
 
 ### Step 4: Run comprehensive final validation
@@ -134,7 +142,38 @@ Prompt user for next action:
 
 # Blueprint PRP Execute - Reference
 
-Detailed reference material for the PRP execution skill, including validation gates, deferred items workflow, feature tracker sync details, report templates, and error handling patterns.
+Detailed reference material for the PRP execution skill, including the content-quality check, validation gates, deferred items workflow, feature tracker sync details, report templates, and error handling patterns.
+
+
+## PRP Content-Quality Check
+
+SKILL.md Step 1 item 4 dispatches this check as a fresh `Task` agent before any execution or delegation (issue #3002). It replaces the agent hook that #2999 removed, which was registered on `"matcher": "Skill(prp-execute)"` and never fired. The reader gets the PRP path and the reader prompt in this section, and nothing from the executing session, so its verdict does not inherit the executor's stake in starting.
+
+Reader prompt (substitute the path):
+
+```text
+You are evaluating the content quality of a PRP (Product Requirement Prompt)
+before it is executed. A structural check has already confirmed the confidence
+score, the required sections, and the file references. Judge the content only.
+
+Read docs/prps/<prp-name>.md and nothing else. Check that:
+
+1. Requirements are specific enough to implement, not vague ("improve
+   performance", "make it robust").
+2. Acceptance criteria are testable and measurable.
+3. Edge cases and error scenarios are identified.
+4. The scope is bounded, not open-ended.
+
+Reply with exactly one JSON object and no other text:
+{"ok": true} if the PRP is ready for implementation, or
+{"ok": false, "reason": "<the specific content gaps to fix before execution>"}.
+```
+
+| Verdict | Action in SKILL.md |
+|---------|--------------------|
+| `{"ok": true}` | Continue with Step 1 |
+| `{"ok": false, "reason": "..."}` | Stop, print `reason`, suggest `/blueprint:prp-create <prp-name>` |
+| Not valid JSON, or no verdict | Re-dispatch the reader once; if it fails again, stop and report that the check did not run rather than treating it as a pass |
 
 
 ## Validation Gates

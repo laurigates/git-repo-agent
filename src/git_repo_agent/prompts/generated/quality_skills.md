@@ -172,7 +172,7 @@ the detector reports no linters found.
 
 ### Step 1: Detect the project language
 
-Read the `Package files` line from Context above (or `ls` the target directory)
+Read the `Package files` line in [Context](#context) (or `ls` the target directory)
 and map each marker file to a language. **The signals are the marker files — do
 not guess from file extensions or the repo name.**
 
@@ -275,7 +275,7 @@ Stop autofix and use a different approach when:
 After linting:
 1. Summary of issues found/fixed
 2. If unfixable issues exist, suggest `/code:refactor` command
-3. If all clean, ready for `/git:smartcommit`
+3. If all clean, ready for `/git:commit`
 
 ---
 
@@ -288,7 +288,7 @@ Systematic extraction of duplicated code into shared, tested abstractions.
 
 ## Execution
 
-Execute this 7-step consolidation workflow. Use TodoWrite to track each extraction as a separate task.
+Execute this 7-step consolidation workflow. Track each extraction as a separate task with `TodoWrite` when the session has the task tools (see `.claude/rules/agentic-permissions.md` § Task-tool availability), otherwise as a checklist in your response.
 
 
 ### Step 1: Discover duplicate clusters (deterministic clone detection)
@@ -305,20 +305,7 @@ npx jscpd --reporters json --min-tokens 50 --output /tmp/jscpd-dry --silent <pat
 
 It writes `/tmp/jscpd-dry/jscpd-report.json`. Read that report and parse its `duplicates` array — each entry gives the exact file/line ranges of a clone pair plus its size in tokens/lines:
 
-```json
-{
-  "duplicates": [
-    {
-      "format": "tsx",
-      "lines": 12,
-      "tokens": 84,
-      "firstFile":  { "name": "src/UserList.tsx",  "start": 20, "end": 32 },
-      "secondFile": { "name": "src/OrderList.tsx", "start": 15, "end": 27 }
-    }
-  ],
-  "statistics": { "total": { "clones": 3, "duplicatedLines": 40, "duplicatedTokens": 252, "percentage": 5.1 } }
-}
-```
+An example of the report shape is in [references/clone-report.md](references/clone-report.md).
 
 For each reported clone, **Read only the line ranges** (`Read` with `offset`/`limit` around `start`/`end`) to confirm the duplication and classify it — do not Read whole candidate files. jscpd similarity is high by construction for a reported clone (a `--min-tokens` match); note the tokens/lines for the Extraction Plan.
 
@@ -342,12 +329,8 @@ When `npx`/`jscpd` is unavailable, or the ecosystem has no `npx` on PATH, fall b
 
 This fallback has lower recall for near-duplicates (renamed variables, reordered params) — prefer the jscpd path when available, and reserve Grep for when it is not.
 
-**Duplication signals to classify** (both the jscpd and the Grep path feed the same categories in Step 2):
-- Utility functions defined identically in multiple files (string truncation, date formatting, validation)
-- Identical error handling blocks (try/catch patterns, error state JSX)
-- Copy-pasted UI fragments (pagination controls, confirmation dialogs, loading states)
-- Repeated hook/state management patterns (delete confirmation + mutation + handler)
-- Duplicated import blocks that signal repeated inline implementations
+The duplication signals both paths feed into Step 2 are listed in
+[references/duplication-signals.md](references/duplication-signals.md).
 
 
 ### Step 2: Classify duplications
@@ -406,19 +389,15 @@ Execute each planned extraction:
 
 **Extraction order:** Start with utilities (no dependencies), then components, then hooks (may depend on utilities/components).
 
-Mark each extraction as completed in the todo list before moving to the next.
+Mark each extraction as completed in the tracker before moving to the next.
 
 
 ### Step 5: Write tests
 
 Write tests for each extracted abstraction:
 
-| Abstraction Type | Test Approach |
-|-----------------|---------------|
-| Utility function | Unit tests covering all input variations, edge cases |
-| UI component | Render tests, prop variations, accessibility |
-| Custom hook | Hook testing with mock dependencies, state transitions |
-| Type definitions | Type-level tests if applicable (tsd, expect-type) |
+Pick the test approach per abstraction type (utility, component, hook, types) from
+[references/test-and-verify.md](references/test-and-verify.md#test-approach-by-abstraction-type).
 
 Place test files adjacent to the abstraction or in the project's test directory, following existing conventions.
 
@@ -436,61 +415,14 @@ After all extractions are complete:
 
 Run the full verification suite:
 
-**TypeScript/JavaScript projects:**
-```bash
-npx tsc --noEmit          # Type checking
-npm run lint              # Linting (or biome/eslint directly)
-npm run test              # Full test suite
-```
-
-**Python projects:**
-```bash
-ty check .                # Type checking
-ruff check .              # Linting
-pytest                    # Test suite
-```
-
-**Rust projects:**
-```bash
-cargo check               # Type checking
-cargo clippy              # Linting
-cargo test                # Test suite
-```
+Run type checking, linting, and the full test suite with the project's tools — the
+TypeScript/JavaScript, Python, and Rust command sets are in
+[references/test-and-verify.md](references/test-and-verify.md#verification-commands).
 
 All three must pass. If any fail, fix the issues before reporting completion.
 
 
 ### Output Summary
 
-After all phases complete, report:
-
-```
-
-## DRY Consolidation Summary
-
-
-### Extractions
-- [Abstraction Name] (type) — replaced N blocks in M files
-- ...
-
-
-### New Files Created
-- path/to/new/file.ts — [description]
-- ...
-
-
-### Tests Added
-- N tests across M test files
-
-
-### Net Effect
-- ~N lines of duplicated code consolidated
-- N reusable abstractions created
-- All verified: typecheck + lint + N passing tests
-```
-
-
-## Related Skills
-
-- If dead code detected during consolidation → `/code:dead-code`
-- If complexity is high after consolidation → `/code:complexity`
+After all phases complete, report using the summary template in
+[references/output-summary.md](references/output-summary.md).
