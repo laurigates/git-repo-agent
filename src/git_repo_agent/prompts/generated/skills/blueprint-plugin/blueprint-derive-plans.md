@@ -12,7 +12,7 @@ Execute this retroactive documentation generation workflow:
 
 ### Step 1: Verify prerequisites
 
-Check context values above:
+Check the values in [Context](#context):
 
 1. If git repository = "NO" → Error: "This directory is not a git repository. Run from project root."
 2. If total commits = "0" → Error: "Repository has no commit history"
@@ -76,7 +76,7 @@ Ask for clarifications via `report to orchestrator`. For the full question templ
 1. **Project purpose** (if not clear from README): present the inferred description for confirmation, or report to the orchestrator to provide one
 2. **Target users**: developers, end users, or both — steers the PRD's framing
 3. **Project phase**: MVP / active development / maintenance / planning major changes — sets feature-vs-stability emphasis
-4. **Stakeholders**: scale (solo / small team / larger org / OSS community) → drives the depth of the PRD's stakeholder matrix (see [REFERENCE.md](REFERENCE.md#stakeholders--personas))
+4. **Stakeholders**: scale (solo / small team / larger org / OSS community) → drives the depth of the PRD's stakeholder matrix (see [REFERENCE.md](REFERENCE.md#prd-template))
 5. **Feature confirmation**: present {N} features extracted from git for review/prioritization
 6. **Architecture rationale**: for each identified decision, ask the main driver
 7. **Generation confirmation**: show the summary below and ask if ready to generate
@@ -101,7 +101,10 @@ For each document type, use templates and patterns from :
    - Mark sections with confidence scores
 
 2. **Generate ADRs** as `docs/adrs/{NNNN}-{title}.md` (one per decision)
-   - Use ADR template from REFERENCE.md
+   - Start from the five-section template
+     `${CLAUDE_SKILL_DIR}/../../templates/adr-template.md` (Context, Decision,
+     Consequences, Options Considered, Related ADRs), filled as described in
+     REFERENCE.md § ADR Template
    - Include git evidence (commit SHA, date, files changed)
    - Mark with confidence score
    - **Conflict & supersede check**: after writing the ADRs, run
@@ -111,7 +114,8 @@ For each document type, use templates and patterns from :
 
 3. **Create ADR index** at `docs/adrs/README.md`
    - Table of all ADRs with status and dates
-   - Link to MADR template for new ADRs
+   - Point new ADRs at blueprint-plugin's `templates/adr-template.md`
+     (the five-section template), not MADR
 
 4. **Generate PRPs** as `docs/prps/{feature}.md` (one per future work item)
    - Use PRP template from REFERENCE.md
@@ -140,35 +144,11 @@ Skip silently when no `gh` remote is configured or the user declines.
 
 ### Step 9: Update task registry
 
-Update the task registry entry in `docs/blueprint/manifest.json`:
+Run the `jq` update in [REFERENCE.md](REFERENCE.md#task-registry-update) on `docs/blueprint/manifest.json`.
 
-```bash
-jq --arg now "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-  --arg sha "$(git rev-parse HEAD 2>/dev/null)" \
-  --argjson analyzed "${COMMITS_ANALYZED:-0}" \
-  --argjson created "${DOCS_GENERATED:-0}" \
-  '.task_registry["derive-plans"].last_completed_at = $now |
-   .task_registry["derive-plans"].last_result = "success" |
-   .task_registry["derive-plans"].context.commits_analyzed_up_to = $sha |
-   .task_registry["derive-plans"].context.commits_analyzed_count = $analyzed |
-   .task_registry["derive-plans"].stats.runs_total = ((.task_registry["derive-plans"].stats.runs_total // 0) + 1) |
-   .task_registry["derive-plans"].stats.items_processed = $analyzed |
-   .task_registry["derive-plans"].stats.items_created = $created' \
-  docs/blueprint/manifest.json > tmp.json && mv tmp.json docs/blueprint/manifest.json
-```
+2. Create summary report: [REFERENCE.md](REFERENCE.md#summary-report-format).
 
-2. Create summary report showing:
-   - Commits analyzed with date range
-   - Git quality score
-   - Documents generated (PRD, ADR count, PRP count)
-   - Sections needing review (confidence < 7)
-   - Recommended next steps
-
-3. Prompt user for next action:
-   - Review and refine documents
-   - Generate project rules from PRD
-   - Generate workflow commands
-   - Exit (documents saved)
+3. Prompt user for next action: [REFERENCE.md](REFERENCE.md#next-action-prompt).
 
 
 # blueprint-derive-plans REFERENCE
@@ -430,43 +410,58 @@ larger org / OSS → full matrix):
 
 ### ADR Template
 
+Start every generated ADR from blueprint-plugin's five-section template,
+`${CLAUDE_SKILL_DIR}/../../templates/adr-template.md`: Context, Decision,
+Consequences, Options Considered, Related ADRs. Its frontmatter passes
+`schemas/adr.schema.json`, which requires the first three sections and leaves
+the last two optional (ADR-0023). The template is what gives a new ADR the
+optional pair; no validator checks for them. A retroactive ADR fills it like
+this (`status: Accepted`, because the schema's status enum has no
+"Retroactive" value):
+
 ```markdown
+---
+id: ADR-{number}
+status: Accepted
+created: {commit_date}
+modified: {today}
+domain: {domain}
+---
+
 
 # ADR-{number}: {Decision Title}
 
-**Date**: {commit_date}
-**Status**: Accepted (Retroactive)
-**Confidence**: {score}/10
+Retroactive: identified from git history. **Confidence**: {score}/10
 
 
-## Decision Drivers
+## Decision
 
-- {driver from user input or inferred}
-- {driver 2}
-
-
-## Considered Options
-
-1. **{Current choice}** - The implemented solution
-2. **{Alternative 1}** - Common alternative for this type of decision
-3. **{Alternative 2}** - Another common alternative
+"{Current choice}" because {user-provided rationale or "rationale needs documentation"}.
 
 
-## Decision Outcome
-
-**Chosen option**: "{Current choice}" because {user-provided rationale or "rationale needs documentation"}.
+## Consequences
 
 
-### Positive Consequences
+### Positive
 
 - {inferred benefit from implementation}
-- {benefit 2}
 
 
-### Negative Consequences
+### Negative
 
-- {known tradeoff if any}
-- {limitation if any}
+- {known tradeoff or limitation, if any}
+
+
+## Options Considered
+
+1. **{Current choice}** - The implemented solution
+2. **{Alternative 1}** - Common alternative for this type of decision (inferred)
+3. **{Alternative 2}** - Another common alternative (inferred)
+
+
+## Related ADRs
+
+- {ADRs in the same domain, or "None"}
 
 
 ## Evidence
@@ -503,7 +498,9 @@ This directory contains Architecture Decision Records (ADRs) documenting signifi
 
 ## Template
 
-New ADRs should follow the [MADR template](https://adr.github.io/madr/).
+New ADRs start from blueprint-plugin's five-section template,
+`templates/adr-template.md` (Context, Decision, Consequences, Options
+Considered, Related ADRs).
 ```
 
 
@@ -608,7 +605,33 @@ New ADRs should follow the [MADR template](https://adr.github.io/madr/).
 ```
 
 
+## Task Registry Update
+
+Step 9 updates the task registry entry in `docs/blueprint/manifest.json`:
+
+```bash
+jq --arg now "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  --arg sha "$(git rev-parse HEAD 2>/dev/null)" \
+  --argjson analyzed "${COMMITS_ANALYZED:-0}" \
+  --argjson created "${DOCS_GENERATED:-0}" \
+  '.task_registry["derive-plans"].last_completed_at = $now |
+   .task_registry["derive-plans"].last_result = "success" |
+   .task_registry["derive-plans"].context.commits_analyzed_up_to = $sha |
+   .task_registry["derive-plans"].context.commits_analyzed_count = $analyzed |
+   .task_registry["derive-plans"].stats.items_processed = $analyzed |
+   .task_registry["derive-plans"].stats.items_created = $created' \
+  docs/blueprint/manifest.json > tmp.json && mv tmp.json docs/blueprint/manifest.json
+```
+
+
 ## Summary Report Format
+
+The Step 9 summary report shows:
+   - Commits analyzed with date range
+   - Git quality score
+   - Documents generated (PRD, ADR count, PRP count)
+   - Sections needing review (confidence < 7)
+   - Recommended next steps
 
 ```
 Blueprint Import Complete!
@@ -640,11 +663,16 @@ PRPs: {N} future work items suggested
 **Next Steps**
 1. Review documents marked "needs clarification"
 2. Run `/blueprint:generate-rules` to create implementation patterns
-3. Run `/blueprint:generate-commands` for workflow automation
 ```
 
 
 ## Next Action Prompt
+
+Step 9 next-action options:
+   - Review and refine documents
+   - Generate project rules from PRD
+   - Generate workflow commands
+   - Exit (documents saved)
 
 After completion, prompt the user with:
 
@@ -655,8 +683,6 @@ options:
     description: "Go through items marked 'needs clarification'"
   - label: "Generate project rules"
     description: "Run /blueprint:generate-rules from the new PRD"
-  - label: "Generate workflow commands"
-    description: "Run /blueprint:generate-commands for this project"
   - label: "I'm done for now"
     description: "Exit - documents are saved and ready for review"
 ```
@@ -664,7 +690,6 @@ options:
 **Based on selection**:
 - "Review and refine" - Show list of documents needing attention with file paths
 - "Generate project rules" - Run `/blueprint:generate-rules`
-- "Generate workflow commands" - Run `/blueprint:generate-commands`
 - "I'm done" - Exit with quick reference
 
 

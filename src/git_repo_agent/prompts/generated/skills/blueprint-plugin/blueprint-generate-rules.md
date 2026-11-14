@@ -175,7 +175,6 @@ Generate project-specific rules from Product Requirements Documents.
      '.task_registry["generate-rules"].last_completed_at = $now |
       .task_registry["generate-rules"].last_result = "success" |
       .task_registry["generate-rules"].context.source_prd_hashes = ($source_prd_hashes // {}) |
-      .task_registry["generate-rules"].stats.runs_total = ((.task_registry["generate-rules"].stats.runs_total // 0) + 1) |
       .task_registry["generate-rules"].stats.items_processed = $processed |
       .task_registry["generate-rules"].stats.items_created = $created' \
      docs/blueprint/manifest.json > tmp.json && mv tmp.json docs/blueprint/manifest.json
@@ -209,8 +208,6 @@ Generate project-specific rules from Product Requirements Documents.
    ```
    question: "Rules generated. What would you like to do next?"
    options:
-     - label: "Generate workflow commands (Recommended)"
-       description: "Create /project:continue and /project:test-loop commands"
      - label: "Update CLAUDE.md"
        description: "Regenerate project overview document with new rules"
      - label: "Review generated rules"
@@ -220,7 +217,6 @@ Generate project-specific rules from Product Requirements Documents.
    ```
 
    **Based on selection:**
-   - "Generate workflow commands" -> Run `/blueprint:generate-commands`
    - "Update CLAUDE.md" -> Run `/blueprint:claude-md`
    - "Review generated rules" -> Show rule file locations and exit
    - "I'm done for now" -> Exit

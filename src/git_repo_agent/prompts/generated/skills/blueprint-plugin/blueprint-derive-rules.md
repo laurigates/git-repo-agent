@@ -41,7 +41,7 @@ Use `$RULES_DIR` for all subsequent reads/writes and conflict checks. Hand-writt
 
 ### Step 3: Extract decision-bearing commits
 
-Use parallel agents to analyze git history efficiently (see [REFERENCE.md](REFERENCE.md#git-analysis)):
+Use parallel agents to analyze git history efficiently (see [REFERENCE.md](REFERENCE.md#git-analysis-patterns)):
 
 - **Agent 1**: Analyze `refactor:` commits for code style patterns
 - **Agent 2**: Analyze `fix:` commits for repeated issue types
@@ -113,7 +113,6 @@ jq --arg now "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
   '.task_registry["derive-rules"].last_completed_at = $now |
    .task_registry["derive-rules"].last_result = "success" |
    .task_registry["derive-rules"].context.commits_analyzed_up_to = $sha |
-   .task_registry["derive-rules"].stats.runs_total = ((.task_registry["derive-rules"].stats.runs_total // 0) + 1) |
    .task_registry["derive-rules"].stats.items_processed = $processed |
    .task_registry["derive-rules"].stats.items_created = $created' \
   docs/blueprint/manifest.json > tmp.json && mv tmp.json docs/blueprint/manifest.json
