@@ -1,5 +1,7 @@
 Copy a generated rule to the custom rules layer for preservation.
-## Steps
+## Execution
+
+Execute this promotion workflow:
 
 **Purpose**:
 - Copy generated content from `.claude/rules/` to preserve modifications
@@ -11,93 +13,104 @@ Copy a generated rule to the custom rules layer for preservation.
 **Examples**:
 - `/blueprint:promote testing-strategies` - Acknowledge a rule's modifications
 
-1. **Parse argument**:
-   - Extract `name` from arguments
-   - If no name provided, list available generated rules and ask user to choose
 
-2. **Locate the rule**:
+### Step 1: Parse argument
 
-   Resolve the rules directory from the manifest — never hardcode
-   `.claude/rules/` (issues #1043, #1675, #2331):
+- Extract `name` from arguments
+- If no name provided, list available generated rules and ask user to choose
 
-   ```bash
-   RULES_DIR=$(jq -r '.structure.generated_rules_path // ".claude/rules/"' docs/blueprint/manifest.json)
-   RULES_DIR="${RULES_DIR%/}"
-   ```
 
-   `generated.rules` keys are **bare filenames including the `.md` extension**,
-   so normalise a bare `{name}` argument to `{name}.md` once and resolve it as
-   `"$RULES_DIR/{key}"` — do **not** append `.md` to a manifest key:
+### Step 2: Locate the rule
 
-   ```bash
-   KEY="{name}"; case "$KEY" in *.md) ;; *) KEY="$KEY.md" ;; esac
-   test -f "$RULES_DIR/$KEY"
-   ```
+Resolve the rules directory from the manifest — never hardcode
+`.claude/rules/` (issues #1043, #1675, #2331):
 
-   If not found:
-   ```
-   Rule '{name}' not found in generated content.
+```bash
+RULES_DIR=$(jq -r '.structure.generated_rules_path // ".claude/rules/"' docs/blueprint/manifest.json)
+RULES_DIR="${RULES_DIR%/}"
+```
 
-   Available rules:
-   - architecture-patterns
-   - testing-strategies
-   - implementation-guides
-   - quality-standards
-   ```
+`generated.rules` keys are **bare filenames including the `.md` extension**,
+so normalise a bare `{name}` argument to `{name}.md` once and resolve it as
+`"$RULES_DIR/{key}"` — do **not** append `.md` to a manifest key:
 
-3. **Check if already acknowledged**:
-   - Read manifest for `custom_overrides.rules`
-   - If already in list, report "Already acknowledged"
+```bash
+KEY="{name}"; case "$KEY" in *.md) ;; *) KEY="$KEY.md" ;; esac
+test -f "$RULES_DIR/$KEY"
+```
 
-4. **Confirm acknowledgment**:
-   ```
-   question: "Acknowledge modifications to {name}?"
-   description: |
-     This will:
-     1. Mark {name} as user-modified in manifest
-     2. Prevent overwrite warnings during sync
-     3. Keep the rule in .claude/rules/
+If not found:
+```
+Rule '{name}' not found in generated content.
 
-   options:
-     - label: "Yes, acknowledge"
-       description: "Mark as user-modified and preserve changes"
-     - label: "No, keep as generated"
-       description: "Leave as regeneratable (may show warnings)"
-   ```
+Available rules:
+- architecture-patterns
+- testing-strategies
+- implementation-guides
+- quality-standards
+```
 
-5. **Update manifest**:
-   - Add to `custom_overrides.rules`
-   - Update `updated_at` timestamp
 
-   Example manifest update:
-   ```json
-   {
-     "generated": {
-       "rules": {
-         // testing-strategies still listed
-       }
-     },
-     "custom_overrides": {
-       "rules": ["testing-strategies"]  // added
-     }
-   }
-   ```
+### Step 3: Check if already acknowledged
 
-6. **Report**:
-   ```
-   Rule modifications acknowledged!
+- Read manifest for `custom_overrides.rules`
+- If already in list, report "Already acknowledged"
 
-   testing-strategies.md:
-   - Location: .claude/rules/testing-strategies.md
-   - Status: User-modified (acknowledged)
 
-   This rule will now:
-   - Not show modification warnings in /blueprint:sync
-   - Still be tracked in manifest
-   - Be your responsibility to maintain
+### Step 4: Confirm acknowledgment
 
-   To edit: .claude/rules/testing-strategies.md
-   ```
+```
+question: "Acknowledge modifications to {name}?"
+description: |
+  This will:
+  1. Mark {name} as user-modified in manifest
+  2. Prevent overwrite warnings during sync
+  3. Keep the rule in .claude/rules/
+
+options:
+  - label: "Yes, acknowledge"
+    description: "Mark as user-modified and preserve changes"
+  - label: "No, keep as generated"
+    description: "Leave as regeneratable (may show warnings)"
+```
+
+
+### Step 5: Update manifest
+
+- Add to `custom_overrides.rules`
+- Update `updated_at` timestamp
+
+Example manifest update:
+```json
+{
+  "generated": {
+    "rules": {
+      // testing-strategies still listed
+    }
+  },
+  "custom_overrides": {
+    "rules": ["testing-strategies"]  // added
+  }
+}
+```
+
+
+### Step 6: Report
+
+```
+Rule modifications acknowledged!
+
+testing-strategies.md:
+- Location: .claude/rules/testing-strategies.md
+- Status: User-modified (acknowledged)
+
+This rule will now:
+- Not show modification warnings in /blueprint:sync
+- Still be tracked in manifest
+- Be your responsibility to maintain
+
+To edit: .claude/rules/testing-strategies.md
+```
 
 **Architecture note (v3.0)**:
 Generated content now goes directly to `.claude/rules/` instead of a separate generated layer.

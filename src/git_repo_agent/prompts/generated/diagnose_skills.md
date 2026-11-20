@@ -381,6 +381,12 @@ gh run rerun <run-id> --failed
 gh run rerun <run-id> --debug
 ```
 
+A re-run reuses the original event's `GITHUB_SHA` and `GITHUB_REF`, so
+`actions/checkout` fetches the commit the run first saw, not current `main`.
+To act on an event against current `main`, dispatch the workflow again
+(`gh workflow run <file> -f issue_number=<n>`) rather than re-running it. See
+[REFERENCE.md § Event-triggered runs](REFERENCE.md#event-triggered-runs-concurrency-and-re-run-traps).
+
 
 ### Cancel Workflows
 
@@ -440,6 +446,26 @@ gh api repos/:owner/:repo/actions/runs/<run-id>/jobs \
 ```
 
 
+### Read job conclusions, not the workflow's
+
+A run's `conclusion: success` also covers jobs that were **skipped**. Jobs gated
+on a tag push or a release event (`if: github.event_name == 'push'`,
+`if: startsWith(github.ref, 'refs/tags/')`, release-please pre-release only)
+report `skipped` on every PR, so PR CI is green for them by construction. A
+change that breaks one merges cleanly and fails on the next release, which can
+be weeks later.
+
+```bash
+gh run view <run-id> --json jobs --jq '.jobs[] | {name, conclusion}'
+```
+
+- To judge whether a specific job (an image build, a release upload) actually
+  ran, read that job's `conclusion`. `skipped` means it verified nothing.
+- Before merging a change to a release-gated job, exercise it: trigger it with
+  `workflow_dispatch`, push a throwaway tag, or run the step locally (for
+  example `docker build --file <Dockerfile> .`).
+
+
 ### Check Workflow Timing
 
 ```bash
@@ -479,6 +505,9 @@ gh run list --limit 50 --json conclusion \
 | Dependency install | "Could not find package", "Version conflict" | Lock versions, use cache |
 | Environment | "Command not found", "Module not found" | Verify setup steps, check runner version |
 | Resource constraints | "out of disk space", "Process killed" | Clean artifacts, increase runner size |
+| Burst of runs dropped | Many runs end `cancelled` with nobody cancelling them, after a burst of triggers into one `concurrency` group | The group keeps one pending run; see [REFERENCE.md § Event-triggered runs](REFERENCE.md#event-triggered-runs-concurrency-and-re-run-traps) |
+| Upstream DNS outage | `apt-get` (or another fetch) fails with `Temporary failure resolving '<host>'` on every job that installs a package, and again on re-run | Ask two public resolvers with a control name before blaming the runner; re-run only once the name resolves. See [REFERENCE.md § Name resolution fails in a package install](REFERENCE.md#name-resolution-fails-in-a-package-install) |
+| Budget exhausted | Job `failure` with zero steps, `--log-failed` says `log not found`, every repo red at once | Read `gh api repos/<o>/<r>/check-runs/<job-id>/annotations`: "The job was not started because an Actions budget is preventing further use". Raise the budget; see `actions-billing-usage` § Budgets |
 
 
 ### gh run Commands
@@ -760,6 +789,114 @@ gh run view <run-id> --log | grep -i "out of memory\|disk space\|killed"
 ```
 
 
+### Name resolution fails in a package install
+
+`Temporary failure resolving 'archive.ubuntu.com'` in an `apt-get` step reads as
+a runner network problem. It can also be the package host's own DNS, and the two
+call for different actions: a runner problem clears on a re-run, an upstream one
+fails every re-run until the host's nameservers answer.
+
+Ask two public resolvers, with a control name that must resolve:
+
+```bash
+curl -s "https://dns.google/resolve?name=archive.ubuntu.com&type=A" | jq '{Status, n: (.Answer // [] | length), Comment}'
+```
+
+```bash
+curl -s -H 'accept: application/dns-json' "https://cloudflare-dns.com/dns-query?name=archive.ubuntu.com&type=A" | jq '{Status, n: (.Answer // [] | length)}'
+```
+
+```bash
+curl -s "https://dns.google/resolve?name=github.com&type=A" | jq '{Status, n: (.Answer // [] | length)}'
+```
+
+- `Status` 0 with answers is a successful lookup. 2 is SERVFAIL and 5 is REFUSED.
+  Google's `Comment` field names the nameservers that did not respond.
+- The control passing while the package host fails places the fault at that
+  host's DNS.
+- One resolver answering does not clear the host. A resolver can serve a cached
+  record, or reach a nameserver the other cannot. Runners that use the failing
+  path keep failing.
+- A successful `curl` to the host from your own machine is not evidence either:
+  it tests your resolver, not the runner's.
+- In the job log, check whether other hosts resolved in the same step. Another
+  package source downloading normally beside the failing one rules out a
+  runner-wide DNS fault.
+
+While the lookup fails, do not re-run. Re-run once the name resolves through the
+resolver that failed. A retry option such as `-o Acquire::Retries=3` does not
+cover an outage that lasts hours.
+
+Read the step list before reporting what the red job means. A job that builds
+and then installs a package for a later test step is red with the build passed:
+
+```bash
+gh run view <run-id> --json jobs --jq '.jobs[] | select(.conclusion=="failure") | .steps[] | {name, conclusion}'
+```
+
+> Observed 2026-11-11 (laurigates/mcu-tinkering-lab#1112): three jobs failed in
+> `apt-get install` from 14:38Z to 16:49Z, across four attempts. The mirrors
+> answered over HTTP from the investigating session, so the failure was first
+> attributed to the runners. Google Public DNS returned SERVFAIL and REFUSED for
+> the Ubuntu names and reported Canonical's nameservers as not responding, while
+> Cloudflare still answered. The firmware build step had passed in the job that
+> showed red. The jobs passed on the first re-run after the names resolved again.
+
+
+## Event-triggered runs: concurrency and re-run traps
+
+
+### A concurrency group keeps one pending run
+
+With `concurrency: {group: X, cancel-in-progress: false}`, a group holds at
+most one running and one pending run. Each newly queued run cancels the
+pending one and takes its slot ([GitHub Docs, "Control the concurrency of
+workflows and jobs"](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency)).
+`cancel-in-progress: false` protects the running run only; it does not queue
+the rest. A workflow that handles one event per run (one issue per
+`issues: opened` run, one push per run) therefore drops most of a burst, and
+the dropped runs show only as `cancelled`.
+
+Fixes, in order of preference:
+
+- **Make each run a sweep** over every unprocessed item (for example, all open
+  issues with the label and no "processed" marker), and add a `schedule`
+  trigger as a backstop. Any run that survives then covers the ones that were
+  cancelled.
+- **`queue: max`** under `concurrency:` allows up to 100 pending runs, served
+  first in first out (ordering is not guaranteed). It cannot be combined with
+  `cancel-in-progress: true`.
+- **Dispatch sequentially**: start the next run after the previous one
+  finishes.
+
+Diagnose by listing conclusions for the workflow:
+`gh run list --workflow <file> -L 50 --json conclusion,createdAt,event`.
+
+> Evidence (2026-11-10, laurigates/research `process-link.yml`): a Telegram bot
+> opened 17 link issues in about 7 minutes. The workflow's comment said it
+> would "queue rather than cancel", but most runs were cancelled; re-running
+> 18 runs at once ended with 14 cancelled (laurigates/research#50).
+
+
+### A re-run checks out the original commit
+
+A re-run uses the same `GITHUB_SHA` and `GITHUB_REF` as the event that first
+triggered the run ([GitHub Docs, "Re-running workflows and jobs"](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/re-run-workflows-and-jobs)).
+For an `issues` or `push` run, `actions/checkout` then checks out `main` as it
+was when the event fired. If `main` has moved and the job regenerates and
+pushes shared files, its rebase-and-retry step fails with
+`could not apply <sha>…`.
+
+Dispatch the workflow instead, with the item as an input:
+`gh workflow run <file> --ref main -f issue_number=<n>`. A `workflow_dispatch`
+run on `main` checks out current `main`. The workflow needs a
+`workflow_dispatch` trigger with that input.
+
+> Evidence (2026-11-10, laurigates/research): 3 of 18 re-runs of
+> `issues: opened` runs failed with `could not apply …` because `main` had
+> moved since the original events.
+
+
 ## Integration with jq (Advanced Parsing)
 
 ```bash
@@ -930,6 +1067,113 @@ Systematic approach to finding and fixing bugs.
 | Flaky test | Timing, shared state | Test isolation |
 
 
+## Diagnose at the Failure Point — Sentinel Values and the Resource Reading
+
+Promoted from `~/.claude/rules/diagnose-at-the-failure-point.md`, whose stub
+keeps the two gate lines. When a tool or library reports a failure, two surface
+features routinely misdirect the diagnosis: the **named entity** in the error,
+and the **framing** you inherited going in. Both are cheap to check against
+reality at the exact point of failure.
+
+
+### 1. A named entity in an error may be a sentinel/default, not a real object
+
+An error that names something by a **low / zero / default identifier** —
+`Memory page 0 doesn't exist`, `id 0`, an empty-string name, `index -1`,
+`0.0.0.0`, a null UUID — is often reporting an **uninitialized or sentinel
+default**, not a real entity that misbehaved. **Before theorizing on the
+entity, verify its identifier came from a real success** (a completed
+allocation / lookup / registration), not a fallback path.
+
+> Canonical break (2026-07, cubecl CUDA): `couldn't find resource for that
+> handle: Memory page 0 doesn't exist` was read — by a handoff issue, the
+> upstream tracker, and me for many iterations — as a memory-pool *reclaim
+> race* corrupting "page 0". It was `MemoryLocation::uninit() = {pool:0,page:0}`:
+> a **failed allocation** left its handle unbound at the zero default, and every
+> downstream lookup of an unbound handle reported "page 0." **Zero** pool
+> reclaims had fired. The tell was mechanical: the count of distinct "missing"
+> handles equalled the count of allocation failures **exactly**.
+
+The tell is usually a **count or ratio that matches something upstream**
+(missing-entity count == failure count) — look for it before accepting the
+entity as real.
+
+
+### 2. For any exhaustion symptom, read the actual resource at the failure point
+
+`OOM` / `out of memory` / `can't allocate` / `ENOSPC` / `too many open files` /
+`pool exhausted` are **symptoms with three different fixes** — genuine
+exhaustion, fragmentation, or a manager/allocator bug — and one measurement at
+the failure point discriminates them:
+
+| Symptom | Read at the failure point | Genuine exhaustion iff |
+|---|---|---|
+| CUDA/GPU OOM | `cuMemGetInfo` (free, total) | free ≪ requested |
+| `ENOSPC` | `df` on the target fs | free ≈ 0 |
+| `EMFILE` / too many files | fd count vs `ulimit -n` | count ≈ limit |
+| allocator/pool "full" | pool `in_use` vs `reserved` vs device total | in_use ≈ device total |
+
+Instrument the *failing call site* to print this; don't infer it from a sampler
+taken seconds earlier (peak may be between samples). In the same case,
+`cuMemGetInfo` at the failing `malloc` showed **0.58 GB free of 25.2 GB** —
+genuinely full, not fragmented, not a pool bug. That one reading ended the
+allocator hunt: the working set simply exceeded the card. Every competing theory
+(reclaim race, cursor guard, sync-before-reclaim, a resolution "lever") had
+already died to a measurement, not an argument.
+
+**Evidence at the failure point > the framing you were handed > a plausible
+mechanism.** A confidently-written issue, a maintainer's stated root cause, and
+an error's own wording are all *inputs to verify*, not conclusions. When a
+theory and a measurement disagree, the measurement wins — re-diagnose, don't
+patch the theory. It bites when an error names an entity by a suspicious
+round/zero/default value, when the fix for a "resource exhausted" failure
+depends on *why*, and when an inherited handoff or upstream tracker already
+asserts a root cause. Skipping the one cheap reading trades a five-second
+`cuMemGetInfo`/`df`/count for a multi-iteration hunt down a mechanism that never
+occurred. Siblings: `agent-patterns-plugin:probe-input-integrity` (an id *you*
+invent), `git-plugin:git-issue-scoping` and `git-plugin:git-upstream-fix-check`
+(don't trust the inherited framing), `agent-patterns-plugin:tool-result-traps`
+(a well-formed output that silently doesn't match reality).
+
+
+## Slow but Not CPU-Bound — Find Where Threads Block
+
+When wall time grows while user time stays flat, or adding threads stops
+helping, the time is spent asleep, where an on-CPU profiler does not sample.
+Compare voluntary context switches against a control
+(`/usr/bin/time -f "%e %U %S vol=%w"`), sample `/proc/<pid>/task/*/wchan`
+for blocked threads (no root), take deep off-CPU stacks with bpftrace on
+`sched:sched_switch` (root), then confirm the lock by removing your own locks
+and by changing the suspected lock's count. Method, script and a worked XFS
+example: [references/blocking-diagnosis.md](references/blocking-diagnosis.md).
+
+
+## Debugging Questions
+
+When stuck, ask:
+1. What changed recently that could cause this?
+2. Does it happen in all environments or just one?
+3. Is the bug in my code or a dependency?
+4. What assumptions am I making that might be wrong?
+5. Can I write a minimal reproduction?
+
+
+## Effective Debugging Practices
+
+- **Targeted changes**: Form a hypothesis, change one thing at a time
+- **Use proper debuggers**: Step through code with breakpoints when possible
+- **Find root causes**: Trace issues to their origin, fix the source
+- **Reproduce first**: Create a minimal reproduction before attempting a fix
+- **Verify the fix**: Confirm the fix resolves the issue and passes tests
+
+For system-level tools (memory analysis, profiling, strace/eBPF tracing, network debugging) and language-specific debugger commands, see .
+
+
+# Debugging Methodology - Reference
+
+System-level tracing/profiling tools and language-specific debugger commands.
+
+
 ## System-Level Tools
 
 
@@ -1024,6 +1268,8 @@ sudo bpftrace -e 'uprobe:./myapp:main.handleRequest { printf("called\n"); }'
 - High-frequency syscalls
 - When you can't afford to slow down the process
 
+For off-CPU stacks (where threads sleep rather than run) and lock-queue diagnosis, see [references/blocking-diagnosis.md](references/blocking-diagnosis.md).
+
 
 ### Network Debugging
 ```bash
@@ -1075,22 +1321,3 @@ dbg!(&variable);
 // Backtrace on panic
 RUST_BACKTRACE=1 cargo run
 ```
-
-
-## Debugging Questions
-
-When stuck, ask:
-1. What changed recently that could cause this?
-2. Does it happen in all environments or just one?
-3. Is the bug in my code or a dependency?
-4. What assumptions am I making that might be wrong?
-5. Can I write a minimal reproduction?
-
-
-## Effective Debugging Practices
-
-- **Targeted changes**: Form a hypothesis, change one thing at a time
-- **Use proper debuggers**: Step through code with breakpoints when possible
-- **Find root causes**: Trace issues to their origin, fix the source
-- **Reproduce first**: Create a minimal reproduction before attempting a fix
-- **Verify the fix**: Confirm the fix resolves the issue and passes tests
