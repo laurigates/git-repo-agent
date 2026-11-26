@@ -5,6 +5,17 @@
 # dependency group pins the same ruff version — keep the two in sync when
 # bumping.
 
+# ruff 0.16+ formats Python code blocks in Markdown by default. 0.15 did not,
+# and src/git_repo_agent/prompts/generated/ is written by the prompt-sync bot,
+# so a local reformat would be overwritten on every sync.
+extend-exclude = ["*.md"]
+
+[lint]
+# ruff 0.15's default rule set, made explicit: ruff 0.16 widened the default
+# from 59 rules to 400+, so without this a ruff bump changes what CI enforces.
+# Adopting a wider set is a separate decision from bumping the ruff version.
+select = ["E4", "E7", "E9", "F"]
+
 [lint.per-file-ignores]
 # The SDK transport monkeypatch must be installed before the modules that
 # construct a transport are imported, so these module-level imports are
