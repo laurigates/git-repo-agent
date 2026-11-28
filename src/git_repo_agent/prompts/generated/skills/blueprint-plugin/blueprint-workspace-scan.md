@@ -24,7 +24,6 @@ emits a structured summary:
 
 ```bash
 bash "${CLAUDE_SKILL_DIR}/scripts/workspace-scan.sh" \
-  --project-dir "$(pwd)" \
   --max-depth 4 $ARGUMENTS
 ```
 

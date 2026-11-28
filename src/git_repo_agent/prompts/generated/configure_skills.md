@@ -12,7 +12,7 @@ Execute this linting configuration check:
 
 ### Step 1: Detect project language and existing linters
 
-Read the context values above and determine:
+Read the values in [Context](#context) and determine:
 
 | Indicator | Language | Detected Linter |
 |-----------|----------|-----------------|
@@ -389,16 +389,16 @@ cargo clippy --all-targets --all-features -- -D warnings
 ### Flake8/isort/black to Ruff
 
 1. Install Ruff: `uv add --group dev ruff`
-2. Configure in `pyproject.toml` (see Ruff template above)
+2. Configure in `pyproject.toml` (see [§ pyproject.toml Template](#pyprojecttoml-template))
 3. Remove old tools: `uv remove flake8 isort black pyupgrade`
 4. Remove old config files: `rm .flake8 .isort.cfg`
-5. Update pre-commit hooks (see below)
+5. Update pre-commit hooks (see [§ Pre-commit Integration](#pre-commit-integration))
 
 
 ### ESLint to Biome
 
 1. Install Biome: `bun add --dev @biomejs/biome`
-2. Create `biome.json` (see template above)
+2. Create `biome.json` (see [§ biome.json Template](#biomejson-template))
 3. Remove ESLint: `bun remove eslint @typescript-eslint/parser @typescript-eslint/eslint-plugin`
 4. Remove config files: `rm .eslintrc* .eslintignore`
 5. Update npm scripts and pre-commit hooks
@@ -412,7 +412,7 @@ cargo clippy --all-targets --all-features -- -D warnings
 ```yaml
 repos:
   - repo: https://github.com/biomejs/pre-commit
-    rev: v2.4.16
+    rev: v2.6.8
     hooks:
       - id: biome-check
         additional_dependencies: ["@biomejs/biome@2.4.16"]
@@ -539,7 +539,7 @@ Run the detection script to scan the project for formatter config files,
 script/hook/CI presence, and a recommendation over the detected booleans:
 
 ```bash
-bash "${CLAUDE_SKILL_DIR}/scripts/configure-formatting.sh" --home-dir "$HOME" --project-dir "$(pwd)"
+bash "${CLAUDE_SKILL_DIR}/scripts/configure-formatting.sh" --home-dir "$HOME"
 ```
 
 Parse `STATUS=` and the `ISSUES:` block from the output. The `KEY=VALUE` lines
@@ -549,8 +549,24 @@ report formatter detection (`BIOME`, `PRETTIER`, `RUFF_FORMAT`, `BLACK`,
 (a modern formatter is set up), `migrate` (a legacy formatter wants migration to
 Biome/Ruff), or `setup` (no formatter detected).
 
+**How `CI_FORMAT` is decided.** The probe scans `.github/workflows/*.yml|yaml`
+for a command that runs the formatter, then resolves **one** level of
+package-script indirection:
+
+| Signal | `CI_FORMAT` | Why |
+|--------|-------------|-----|
+| Workflow runs `biome check` / `biome ci` | `true` | In Biome 2.x `check` is the combined command (formatter + linter + import sorting); `ci` is its CI-oriented variant |
+| Workflow runs `biome format`, `ruff format`, `cargo fmt`, `prettier` | `true` | Format-only commands, named directly |
+| Workflow runs `biome lint` | `false` | Lint-only — it does not format |
+| Workflow runs `bun run <s>` / `npm run <s>` / `pnpm run <s>` / `yarn <s>` and `package.json`'s `scripts.<s>` contains any command above | `true` | The idiomatic setup keeps the real command in `package.json` |
+| That script calls *another* script (depth 2+) | `false` | Exactly one level is resolved; deeper chains are out of scope |
+
+Indirection needs `jq` and a readable `package.json`. When `package.json` is
+absent, unparseable, or has no `scripts` key — or `jq` is unavailable — the
+lookup degrades silently to the direct-command scan (no stderr, exit 0).
+
 **Modern formatting preferences:**
-- **JavaScript/TypeScript**: Biome (replaces Prettier + ESLint). On `RECOMMENDATION=migrate` with Prettier present, offer migration to Biome — do not configure Prettier as the target formatter.
+- **JavaScript/TypeScript**: Biome (replaces Prettier; replaces ESLint only when the repo is dropping it). A repo that keeps ESLint gets Biome as a formatter only. On `RECOMMENDATION=migrate` with Prettier present, offer migration to Biome — do not configure Prettier as the target formatter.
 - **Python**: Ruff format (replaces Black)
 - **Rust**: rustfmt (standard)
 
@@ -587,6 +603,8 @@ Based on detected language and formatter preference, install and configure. Use 
 3. Add format scripts to package.json or Makefile/justfile
 4. Configure ignore patterns in the formatter config (e.g. `files.includes` in biome.json)
 
+**Scope Biome to the languages you mean to format.** Biome 2.6 formats Markdown and JSON as well, so `"includes": ["**"]` rewrites README and CLAUDE.md tables and `.claude/settings.json` (`.claude/rules/biome-markdown.md` records the same for this marketplace). For a JavaScript repo list the JS globs (`*.js`, `src/**/*.js`), negate `node_modules`, `coverage` and `.claude/worktrees` (agent checkouts hold full copies of every file), and set `linter` and `assist` to `enabled: false` when ESLint stays the linter. `vcs.useIgnoreFile: true` errors when the repo has no `.gitignore`. Land the reformat as its own commit after the config commit, and as the last PR of a run: it rewrites every file other PRs touch.
+
 
 ### Step 4: Create EditorConfig integration
 
@@ -607,7 +625,7 @@ Use migration guides from .
 
 ### Step 6: Configure pre-commit hooks
 
-Add formatter to `.pre-commit-config.yaml` using the appropriate hook repository.
+Add formatter to `.pre-commit-config.yaml`. For Biome, prefer a local hook that runs the version pinned in `package.json`, so the hook, CI and the editor share one version; the mirror hook takes its version from a second pin (`additional_dependencies`) that drifts. Templates: [REFERENCE.md](REFERENCE.md#pre-commit-hooks).
 
 
 ### Step 7: Configure CI/CD integration
@@ -663,6 +681,7 @@ For detailed configuration templates, migration guides, and pre-commit configura
 - **No package manager found**: Cannot install formatter, error
 - **Invalid configuration**: Report parse error, offer to replace with template
 - **Formatting conflicts**: Report files that would be reformatted
+- **Biome rewrites Markdown or JSON you did not mean to format**: `files.includes` reaches them; narrow it to the language globs (Step 3) and restore the files with `git restore -- <paths>`
 
 
 # configure-formatting Reference
@@ -676,21 +695,35 @@ Configuration templates, migration guides, and pre-commit configurations for cod
 ### Install
 
 ```bash
-npm install --save-dev @biomejs/biome
+npm install --save-dev --save-exact @biomejs/biome
 
 # or
-bun add --dev @biomejs/biome
+bun add --dev --exact @biomejs/biome
 ```
+
+Pin the exact version: the pre-commit hook, CI and the editor then run the same Biome.
 
 
 ### `biome.json`
 
+Biome 2.x syntax (`files.includes` with `!` negations; the 1.x keys `include` and `ignore` are an error: ``Found an unknown key `include` ``). Match the style the code already has (quotes, semicolons, trailing commas) so the reformat stays small; these values are a starting point.
+
 ```json
 {
-  "$schema": "https://biomejs.dev/schemas/1.9.4/schema.json",
+  "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
+  "vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true },
+  "files": {
+    "includes": [
+      "*.{js,ts}",
+      "src/**/*.{js,jsx,ts,tsx}",
+      "!**/node_modules",
+      "!**/dist",
+      "!**/coverage",
+      "!.claude/worktrees"
+    ]
+  },
   "formatter": {
     "enabled": true,
-    "formatWithErrors": false,
     "indentStyle": "space",
     "indentWidth": 2,
     "lineWidth": 100,
@@ -701,30 +734,17 @@ bun add --dev @biomejs/biome
       "quoteStyle": "single",
       "semicolons": "always",
       "trailingCommas": "all",
-      "arrowParentheses": "always",
-      "bracketSpacing": true,
-      "jsxQuoteStyle": "double"
+      "arrowParentheses": "always"
     }
   },
-  "json": {
-    "formatter": {
-      "enabled": true,
-      "indentWidth": 2
-    }
-  },
-  "files": {
-    "include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.js", "src/**/*.jsx", "*.json"],
-    "ignore": [
-      "node_modules",
-      "dist",
-      "build",
-      ".next",
-      "coverage",
-      "*.min.js"
-    ]
-  }
+  "linter": { "enabled": false },
+  "assist": { "enabled": false }
 }
 ```
+
+- **Scope.** `"includes": ["**"]` also formats Markdown and JSON: it rewrote README and CLAUDE.md tables and `.claude/settings.json` in a run on a repo that wanted JavaScript only. List the language globs instead. A fixture with one `.js` file, `README.md` and a file under `.claude/worktrees/` was checked as 2 files with the language globs and 4 with `["**"]`. The `biome.json` itself is always checked.
+- **`vcs.useIgnoreFile`** needs a `.gitignore` at the project root; without one Biome stops with `couldn't find an ignore file`.
+- **`linter` and `assist` off** when ESLint stays the linter. Set `linter.enabled` to `true` (and add rules) only when the repo is dropping ESLint.
 
 
 ### package.json Scripts
@@ -934,14 +954,20 @@ uv remove black
 
 ### Biome
 
+A local hook runs the Biome pinned in `package.json`, so nothing else carries a version:
+
 ```yaml
 repos:
-  - repo: https://github.com/biomejs/pre-commit
-    rev: v2.4.16
+  - repo: local
     hooks:
-      - id: biome-check
-        additional_dependencies: ["@biomejs/biome@2.4.16"]
+      - id: biome-format
+        name: Biome format
+        entry: npx --no-install biome format --write --no-errors-on-unmatched
+        language: system
+        types: [javascript]
 ```
+
+The mirror hook (`https://github.com/biomejs/pre-commit`) installs its own Biome from `additional_dependencies`, a second pin that has to be bumped with `package.json` and with the hook's `rev`. Its `biome-check` id also runs the linter and, on 2.6+, the Markdown formatter. Use the mirror only for a repo with no `package.json`, pin `additional_dependencies` to the same version, and pick `biome-format` rather than `biome-check` when ESLint stays the linter.
 
 
 ### Ruff Format
@@ -973,7 +999,7 @@ repos:
 
 ```yaml
 - name: Check formatting
-  run: npx @biomejs/biome format .
+  run: npm run format:check   # biome format ., the version pinned in package.json
 ```
 
 
@@ -1481,7 +1507,7 @@ tests/
   run: npm test -- --reporter=junit --reporter=default --coverage
 
 - name: Upload coverage
-  uses: codecov/codecov-action@v5
+  uses: codecov/codecov-action@v5.5.5
   with:
     files: ./coverage/lcov.info
 ```
@@ -1495,7 +1521,7 @@ tests/
     uv run pytest --junitxml=junit.xml --cov-report=xml
 
 - name: Upload coverage
-  uses: codecov/codecov-action@v5
+  uses: codecov/codecov-action@v5.5.5
   with:
     files: ./coverage.xml
 ```
@@ -1511,7 +1537,7 @@ tests/
   run: cargo nextest run --profile ci --no-fail-fast
 
 - name: Upload test results
-  uses: actions/upload-artifact@v7
+  uses: actions/upload-artifact@v7.0.2
   with:
     name: test-results
     path: target/nextest/ci/junit.xml
@@ -1599,6 +1625,7 @@ Execute this pre-commit compliance check:
 2. If not found, auto-detect:
    - **infrastructure**: Has `terraform/`, `helm/`, `argocd/`, or `*.tf` files
    - **frontend**: Has `package.json` with vue/react dependencies
+   - **node**: Has any other `package.json`
    - **python**: Has `pyproject.toml` or `requirements.txt`
 3. Apply `--type` flag override if provided
 
@@ -1611,13 +1638,9 @@ Execute this pre-commit compliance check:
 
 ### Step 3: Verify hook versions against latest releases
 
-**CRITICAL**: Before flagging outdated hooks, verify latest releases using WebSearch or WebFetch:
+**CRITICAL**: Take the latest revs from the tool, not from a pinned list or memory. After writing or auditing the config, run `pre-commit autoupdate` (it resolves each hook repo's newest tag), then `pre-commit validate-config .pre-commit-config.yaml`. A new config written from a template with older revs moved `pre-commit-hooks` v5.0.0 to v6.0.0, `conventional-pre-commit` v4.3.0 to v4.5.0, `gitleaks` v8.22.1 to v8.30.0 and `actionlint` v1.7.7 to v1.7.12 in one run.
 
-1. **pre-commit-hooks**: [GitHub releases](https://github.com/pre-commit/pre-commit-hooks/releases)
-2. **conventional-pre-commit**: [GitHub releases](https://github.com/compilerla/conventional-pre-commit/releases)
-3. **biome**: [GitHub releases](https://github.com/biomejs/biome/releases)
-4. **ruff-pre-commit**: [GitHub releases](https://github.com/astral-sh/ruff-pre-commit/releases)
-5. **gitleaks**: [GitHub releases](https://github.com/gitleaks/gitleaks/releases)
+`autoupdate` cannot resolve a `repo: local` hook; read a local hook's version from where it is pinned (for a Biome hook, `package.json`). Use WebSearch or WebFetch on a hook repo's releases page only when `autoupdate` fails for it. For `--check-only`, run it on a copy (`cp .pre-commit-config.yaml tmp/pc.yaml && pre-commit autoupdate --config tmp/pc.yaml`) and diff, so the audit writes nothing.
 
 
 ### Step 4: Analyze compliance
@@ -1627,6 +1650,7 @@ Compare existing configuration against the project standards in :
 **Required Base Hooks (All Projects):**
 - `pre-commit-hooks` v5.0.0+ with: trailing-whitespace, end-of-file-fixer, check-yaml, check-json, check-merge-conflict, check-added-large-files
 - `conventional-pre-commit` v4.3.0+ with commit-msg stage
+- `default_install_hook_types` listing `pre-commit` and `commit-msg`, plus `default_stages: [pre-commit]` whenever `commit-msg` is installed. Flag a missing `default_stages` as WARN: without it every unstaged file hook runs at both installed stages, so each commit runs the hook list twice
 
 **Frontend-specific:**
 - `biome` (pre-commit) v0.4.0+
@@ -1656,6 +1680,10 @@ Config File: .pre-commit-config.yaml ([found|missing])
 Hook Status:
   [hook-name]     [version]   [PASS|WARN|FAIL] ([details])
 
+Hook Types:
+  default_install_hook_types  [pre-commit, commit-msg]  [PASS|FAIL]
+  default_stages              [pre-commit]              [PASS|WARN] (missing: file hooks run twice per commit)
+
 Outdated Hooks:
   - [hook]: [current] -> [standard]
 
@@ -1670,9 +1698,9 @@ If `--fix` flag is set or user confirms:
 1. **Missing config file**: Create from standard template for detected project type
 2. **Missing hooks**: Add required hooks with standard versions
 3. **Outdated versions**: Update `rev:` values to standard versions
-4. **Missing hook types**: Add `default_install_hook_types` with `pre-commit` and `commit-msg`
+4. **Missing hook types**: Add `default_install_hook_types` with `pre-commit` and `commit-msg`, and `default_stages: [pre-commit]` beside it. Keep the explicit `stages: [commit-msg]` on conventional-pre-commit or commitizen hooks
 
-After modification, run `pre-commit install --install-hooks` to install hooks.
+After modification, run `pre-commit install --install-hooks`. `default_install_hook_types` makes that one command install both hook types; see  for why `default_stages` is needed.
 
 
 ### Step 7: Update standards tracking
@@ -1732,6 +1760,7 @@ Required hooks for frontend applications:
 default_install_hook_types:
   - pre-commit
   - commit-msg
+default_stages: [pre-commit]
 
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
@@ -1749,13 +1778,13 @@ repos:
       - id: detect-private-key
 
   - repo: https://github.com/compilerla/conventional-pre-commit
-    rev: v4.4.0
+    rev: v4.5.0
     hooks:
       - id: conventional-pre-commit
         stages: [commit-msg]
 
   - repo: https://github.com/biomejs/pre-commit
-    rev: v2.4.16
+    rev: v2.6.8
     hooks:
       - id: biome-check
         additional_dependencies: ["@biomejs/biome@2.4.16"]
@@ -1777,6 +1806,7 @@ Required hooks for infrastructure (Terraform, Helm, ArgoCD):
 default_install_hook_types:
   - pre-commit
   - commit-msg
+default_stages: [pre-commit]
 
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
@@ -1794,7 +1824,7 @@ repos:
       - id: check-added-large-files
 
   - repo: https://github.com/compilerla/conventional-pre-commit
-    rev: v4.4.0
+    rev: v4.5.0
     hooks:
       - id: conventional-pre-commit
         stages: [commit-msg]
@@ -1832,6 +1862,7 @@ Required hooks for Python projects:
 default_install_hook_types:
   - pre-commit
   - commit-msg
+default_stages: [pre-commit]
 
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
@@ -1847,7 +1878,7 @@ repos:
       - id: detect-private-key
 
   - repo: https://github.com/compilerla/conventional-pre-commit
-    rev: v4.4.0
+    rev: v4.5.0
     hooks:
       - id: conventional-pre-commit
         stages: [commit-msg]
@@ -1883,6 +1914,11 @@ Every repository MUST have these hooks:
 
 2. **conventional-pre-commit** (v4.4.0+)
    - `conventional-pre-commit` in `commit-msg` stage
+
+3. **Hook-type settings**
+   - `default_install_hook_types` lists `pre-commit` and `commit-msg`
+   - `default_stages: [pre-commit]` is set whenever `commit-msg` is installed
+     (WARN when missing: every file hook runs twice per commit)
 
 
 ### Status Levels
@@ -1934,15 +1970,26 @@ No special exclusions needed for standard Python projects.
 After configuring `.pre-commit-config.yaml`:
 
 ```bash
-pre-commit install
-pre-commit install --hook-type commit-msg
-```
-
-Or simply:
-
-```bash
 pre-commit install --install-hooks
 ```
+
+`default_install_hook_types` makes that one command install both the
+`pre-commit` and `commit-msg` hook types; `--install-hooks` also builds the hook
+environments up front. Without `default_install_hook_types`, plain
+`pre-commit install` installs only the `pre-commit` type and commit-msg hooks
+never run.
+
+
+### Why `default_stages: [pre-commit]`
+
+A hook with no `stages` key runs at every installed stage. Once the
+`commit-msg` type is installed, every file hook (whitespace fixers,
+`check-yaml`, `gitleaks`, …) runs twice per commit, once at pre-commit and again
+at commit-msg, which doubles the time and prints the hook list twice.
+`default_stages: [pre-commit]` confines unstaged hooks to the pre-commit stage;
+the message hooks keep their explicit `stages: [commit-msg]`. Write it whenever
+`commit-msg` is among the installed hook types (observed with pre-commit 4.6.2
+and pre-commit-hooks v6.0.0, #2824).
 
 
 ## Updating
@@ -1953,7 +2000,42 @@ To update all hooks to latest versions:
 pre-commit autoupdate
 ```
 
-Then verify versions match project standards.
+Then verify versions match project standards. `autoupdate` skips `repo: local`
+hooks and accepts `--config <file>`, so an audit can run it on a copy and diff
+without touching the real config.
+
+
+## Gitleaks and documentation placeholders
+
+gitleaks' default `curl-auth-header` rule matches an API-key header in a docs
+`curl` example, so a README or usage page with a placeholder key blocks the
+commit that adds it (three hits on one `docs/usage.md`). Allowlist the
+placeholder string, not the file, so a real key in the same file is still caught:
+
+```toml
+
+# .gitleaks.toml
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Documentation placeholders, not credentials"
+regexes = ['''YOUR_API_KEY''', '''your_api_key''']
+```
+
+`gitleaks protect --staged -c .gitleaks.toml` reports `no leaks found` with
+this file and exits 1 without it. The pre-commit hook scans staged changes, so a
+placeholder committed before the hook existed surfaces only when a later commit
+touches that text.
+
+
+## First commit after adding hooks
+
+`trailing-whitespace` and `end-of-file-fixer` rewrite every file a commit
+touches, not just the changed lines. The first commit that stages an old file
+fails with "files were modified by this hook"; `git add -- <paths>` the rewrite
+and commit again. Expect the whole-file diff, and expect it to conflict with
+another open PR that edits the same file.
 
 ---
 
@@ -1981,7 +2063,7 @@ Verify latest versions before reporting outdated actions:
 6. `docker/login-action` - [releases](https://github.com/docker/login-action/releases)
 7. `docker/metadata-action` - [releases](https://github.com/docker/metadata-action/releases)
 8. `reproducible-containers/buildkit-cache-dance` - [releases](https://github.com/reproducible-containers/buildkit-cache-dance/releases)
-9. `google-github-actions/release-please-action` - [releases](https://github.com/google-github-actions/release-please-action/releases)
+9. `googleapis/release-please-action` - [releases](https://github.com/googleapis/release-please-action/releases)
 
 Use WebSearch or WebFetch to verify current versions.
 
@@ -1990,15 +2072,18 @@ Use WebSearch or WebFetch to verify current versions.
 
 1. Check for `.github/workflows/` directory
 2. List all workflow files (*.yml, *.yaml)
-3. Categorize workflows by purpose (container build, test, release)
+3. Categorize workflows by purpose (container build, test, release, renovate)
+4. Read the repo owner from `git remote get-url origin`. An owner of `laurigates` means the account-wide `laurigates-renovate` App autodiscovers the repo and already runs Renovate for it
 
 Determine required workflows based on project type:
 
 | Project Type | Required Workflows |
 |--------------|-------------------|
-| Frontend | container-build, release-please, renovate (optional: claude-auto-fix) |
-| Python | container-build, release-please, test, renovate (optional: claude-auto-fix) |
-| Infrastructure | release-please, renovate (optional: docs, claude-auto-fix) |
+| Frontend | container-build, release-please (optional: claude-auto-fix) |
+| Python | container-build, release-please, test (optional: claude-auto-fix) |
+| Infrastructure | release-please (optional: docs, claude-auto-fix) |
+
+Renovate is not a per-project-type requirement; where it runs depends on the repo owner (see the Renovate Workflow Checks table). A repo the `laurigates-renovate` App covers needs no Renovate workflow at all. A repo in an org the App does not cover gets the reusable Renovate caller from .
 
 
 ### Step 3: Analyze workflow compliance
@@ -2026,7 +2111,7 @@ Determine required workflows based on project type:
 
 | Check | Standard | Severity |
 |-------|----------|----------|
-| Action version | v4 | WARN if older |
+| Action version | v5 | WARN if older |
 | Token | MY_RELEASE_PLEASE_TOKEN | WARN if GITHUB_TOKEN |
 | Permissions | contents: write, pull-requests: write | FAIL if missing |
 
@@ -2040,6 +2125,17 @@ Determine required workflows based on project type:
 | Coverage | Coverage upload | INFO |
 
 **Renovate Workflow Checks:**
+
+Decide coverage first, from the owner read in Step 2:
+
+| Repo owner | Per-repo Renovate workflow | Verdict |
+|------------|----------------------------|---------|
+| `laurigates` (App-covered) | Absent | PASS — the `laurigates-renovate` App runs Renovate |
+| `laurigates` (App-covered) | Present (`renovatebot/github-action` or a reusable Renovate caller) | WARN: duplicate Renovate identity — two dependency dashboards contend on the same `renovate/*` branches; recommend removing the workflow |
+| Any other org | Absent | INFO — recommend the reusable caller |
+| Any other org | Present | Run the per-repo checks |
+
+Per-repo checks, only for a repo the App does not cover:
 
 | Check | Standard | Severity |
 |-------|----------|----------|
@@ -2075,6 +2171,7 @@ For the report format, see .
 2. **Outdated actions**: Update version numbers
 3. **Missing multi-platform**: Add platforms to build-push
 4. **Missing caching**: Add GHA cache configuration
+5. **Duplicate Renovate identity**: Delete the per-repo Renovate workflow only after the user confirms, since `--fix` never removes a workflow on its own
 
 For standard templates (container build, test workflow), see .
 
@@ -2113,8 +2210,12 @@ container-build.yml Checks:
   Permissions           Explicit        [PASS | MISSING]
 
 release-please.yml Checks:
-  Action version        v4              [PASS | OUTDATED]
+  Action version        v5              [PASS | OUTDATED]
   Token                 MY_RELEASE...   [PASS | WRONG TOKEN]
+
+Renovate:
+  Owner                 laurigates      [App-covered | not covered]
+  Per-repo workflow     renovate.yml    [PASS (absent) | WARN duplicate Renovate identity]
 
 Missing Workflows:
   - test.yml (recommended for frontend projects)
@@ -2149,11 +2250,11 @@ jobs:
       id-token: write  # Required for provenance/SBOM attestations
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v6.1.0
 
-      - uses: docker/setup-buildx-action@v4
+      - uses: docker/setup-buildx-action@v4.4.1
 
-      - uses: docker/login-action@v4
+      - uses: docker/login-action@v4.8.0
         if: github.event_name != 'pull_request'
         with:
           registry: ${{ env.REGISTRY }}
@@ -2161,7 +2262,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - id: meta
-        uses: docker/metadata-action@v6
+        uses: docker/metadata-action@v6.2.0
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
@@ -2177,7 +2278,7 @@ jobs:
             type=match,pattern=.*-v(\d+),group=1
 
       - id: build-push
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@v7.4.0
         with:
           context: .
           platforms: linux/amd64,linux/arm64
@@ -2227,7 +2328,7 @@ For persisting BuildKit `--mount=type=cache` mounts across CI runs:
 ```yaml
 - name: Cache BuildKit mounts
   id: cache
-  uses: actions/cache@v5
+  uses: actions/cache@v5.1.0
   with:
     path: buildkit-cache
     key: ${{ runner.os }}-buildkit-${{ hashFiles('package.json', 'bun.lock') }}
@@ -2235,7 +2336,7 @@ For persisting BuildKit `--mount=type=cache` mounts across CI runs:
       ${{ runner.os }}-buildkit-
 
 - name: Inject BuildKit cache mounts
-  uses: reproducible-containers/buildkit-cache-dance@v3.3.0
+  uses: reproducible-containers/buildkit-cache-dance@v3.4.0
   with:
     cache-map: |
       {
@@ -2263,9 +2364,9 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v6.1.0
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v6.5.0
         with:
           node-version: '22'
           cache: 'npm'
@@ -2278,6 +2379,12 @@ jobs:
 
 
 ## Renovate Caller Workflow Template
+
+Only for a repo whose org the account-wide `laurigates-renovate` App does not
+cover, such as `ForumViriumHelsinki`. A `laurigates/*` repo gets Renovate from
+the App, and adding this caller there creates a duplicate Renovate identity: a
+second dependency dashboard and a second runner contending on the same
+`renovate/*` branches.
 
 ```yaml
 name: Renovate
@@ -2363,7 +2470,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v6.1.0
         with:
           ref: ${{ github.event.workflow_run.head_branch || github.ref }}
           fetch-depth: 0
@@ -2376,7 +2483,7 @@ jobs:
       # - Code generation or build prerequisites
       #
       # Examples:
-      #   - uses: actions/setup-node@v6
+      #   - uses: actions/setup-node@v6.5.0
       #     with:
       #       node-version: '22'
       #   - run: npm ci
@@ -2456,7 +2563,7 @@ jobs:
 
       - name: Run Claude auto-fix analysis
         if: steps.dedup.outputs.skip != 'true'
-        uses: anthropics/claude-code-action@v1
+        uses: anthropics/claude-code-action@v1.0.283
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 
@@ -2533,17 +2640,19 @@ jobs:
 
             If PR failure, comment on PR #${{ steps.context.outputs.pr_number }} with issue link.
 
-            ### Important Rules
+            ### Constraints (this run is unattended — nobody can answer a question, so act on these rather than asking)
 
-            - Do NOT force push or rewrite history
-            - Do NOT modify workflow files (.github/workflows/)
-            - Do NOT add new dependencies without strong justification
-            - Do NOT make unrelated changes
-            - If in doubt, prefer opening an issue
-            - Use the project conventions from CLAUDE.md
+            - No force-push or history rewrite: the branch may already be checked out by a reviewer, and a rewrite destroys their view of what failed.
+            - Leave `.github/workflows/` alone: the token this job runs with cannot push workflow-file changes, and those files need a human change anyway.
+            - No new dependencies unless the failure is literally a missing one: a dependency added by a bot lands unreviewed in the lockfile.
+            - Fix only what the failing job reported. Note any unrelated bug you notice in the PR body as a follow-up instead of changing it.
+            - Follow the project conventions in CLAUDE.md.
+            - When you are unsure the fix is right, open the issue (Step 3B) and stop.
 
+          # opus is an alias for the current Opus generation; set --effort explicitly — it is the cost lever and the harness default is high.
           claude_args: |
-            --model claude-sonnet-4-6
+            --model opus
+            --effort medium
             --allowedTools "Edit,MultiEdit,Write,Read,Glob,Grep,Bash(npm:*),Bash(npx:*),Bash(yarn:*),Bash(pnpm:*),Bash(bun:*),Bash(bunx:*),Bash(pip:*),Bash(python:*),Bash(cargo:*),Bash(go:*),Bash(make:*),Bash(just:*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git branch:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(git switch:*),Bash(git checkout -b:*),Bash(gh issue create:*),Bash(gh issue list:*),Bash(gh issue comment:*),Bash(gh pr create:*),Bash(gh pr list:*),Bash(gh pr comment:*),Bash(gh pr view:*),Bash(gh run view:*),Bash(gh run list:*),Bash(ls:*),Bash(find:*),Bash(grep:*),Bash(cat:*)"
             --max-turns 50
 ```
@@ -2740,6 +2849,7 @@ export default defineConfig({
         statements: 80,
       },
 
+      // Load-bearing: pins the denominator to source files (see below)
       include: ['src/**/*.{js,ts,jsx,tsx}'],
 
       exclude: [
@@ -2755,12 +2865,15 @@ export default defineConfig({
       ],
 
       clean: true,
-      all: true,
       skipFull: false,
     },
   },
 });
 ```
+
+**Vitest 4 removed `coverage.all`** (and `coverage.extensions`). It now reports only the files the tests loaded, unless `coverage.include` is set. An `all: true` left in a v4 config is silently ignored, so the config looks correct while the denominator stays unpinned. Use `include` in its place.
+
+Without `include`, the denominator is the test suite's import graph, not the codebase. A PR that adds *only tests* can then lower the measured figure and fail its own threshold. The first test that imports a module with many untested siblings pulls them in at near-zero coverage (observed: 61.8% → 42.0% against 60% thresholds, with no regression). Treat thresholds as a ratchet. A change of basis, such as adding `include`, goes in its own commit that states the old and new figures.
 
 
 ### Package.json Scripts
@@ -2953,7 +3066,7 @@ cargo coverage-lcov
   run: npm run test:coverage
 
 - name: Upload coverage to Codecov
-  uses: codecov/codecov-action@v4
+  uses: codecov/codecov-action@v4.6.0
   with:
     token: ${{ secrets.CODECOV_TOKEN }}
     files: ./coverage/lcov.info
@@ -2962,7 +3075,7 @@ cargo coverage-lcov
     fail_ci_if_error: true
 
 - name: Upload coverage artifacts
-  uses: actions/upload-artifact@v4
+  uses: actions/upload-artifact@v4.6.2
   if: always()
   with:
     name: coverage-report
@@ -2977,7 +3090,7 @@ cargo coverage-lcov
   run: uv run pytest --cov --cov-report=xml --cov-report=html
 
 - name: Upload coverage to Codecov
-  uses: codecov/codecov-action@v4
+  uses: codecov/codecov-action@v4.6.0
   with:
     token: ${{ secrets.CODECOV_TOKEN }}
     files: ./coverage/coverage.xml
@@ -2986,7 +3099,7 @@ cargo coverage-lcov
     fail_ci_if_error: true
 
 - name: Upload coverage artifacts
-  uses: actions/upload-artifact@v4
+  uses: actions/upload-artifact@v4.6.2
   if: always()
   with:
     name: coverage-report
@@ -3004,7 +3117,7 @@ cargo coverage-lcov
   run: cargo llvm-cov --all-features --lcov --output-path lcov.info
 
 - name: Upload coverage to Codecov
-  uses: codecov/codecov-action@v4
+  uses: codecov/codecov-action@v4.6.0
   with:
     token: ${{ secrets.CODECOV_TOKEN }}
     files: ./lcov.info
@@ -3097,7 +3210,9 @@ Determine appropriate release-type from detected package files:
 ### Step 3: Analyze compliance
 
 **Workflow file checks**:
-- Action version: `googleapis/release-please-action@v4`
+- Action version: `googleapis/release-please-action@v5` (the portfolio
+  standard; v5's only breaking change is the node24 runtime, so a v4 workflow
+  upgrades without input changes)
 - Token: Uses a non-`GITHUB_TOKEN` release token. Accept **either** pattern:
   - **GitHub App token (preferred)** — `actions/create-github-app-token` mints
     a token from `app-id: ${{ vars.RELEASE_PLEASE_APP_ID }}` /
@@ -3116,6 +3231,10 @@ Determine appropriate release-type from detected package files:
 **Manifest file checks**:
 - Valid JSON structure
 - Package paths match config
+- A `0.0.0` entry with no release tag for that package and no
+  `initial-version` on the matching config package is a FAIL: until the first
+  tag exists release-please ignores the manifest and falls back to its default
+  initial version, so the first release PR proposes `1.0.0`
 
 
 ### Step 4: Generate compliance report
@@ -3129,8 +3248,11 @@ For the report format, see .
 
 1. **Missing workflow**: Create from standard template
 2. **Missing config**: Create with detected release-type
-3. **Missing manifest**: Create with initial version `0.0.0`
-4. **Outdated action**: Update to v4
+3. **Missing manifest**: Create with `0.0.0` and set `initial-version` on the package in `release-please-config.json`
+   whenever the repo has no release tag yet: the version already in the
+   package file, or `0.1.0` for a pre-1.0 project. Without it the first
+   release is `1.0.0`
+4. **Outdated action**: Update to v5
 5. **Wrong token**: Use the GitHub App-token pattern (preferred) or
    `MY_RELEASE_PLEASE_TOKEN` — never `GITHUB_TOKEN`. A workflow already on
    `create-github-app-token` is compliant; leave it as-is.
@@ -3159,6 +3281,14 @@ components:
     so this is the standard that matches every other repo.
   - **`MY_RELEASE_PLEASE_TOKEN` PAT (legacy)** — a personal-access-token secret
     in repository settings. Still valid, but diverges from the org standard.
+- **Tag listeners need the release token too** — a tag or release created
+  with `GITHUB_TOKEN` starts no other workflow, so a downstream build on
+  `push: tags` (binary dist, container publish) never runs. Use the App token
+  (or PAT) whenever anything listens on the tag, not only so release PRs get CI
+- **First release version** — with no release tag the manifest is ignored;
+  set `initial-version` in the config or the first release is `1.0.0`
+- **Rust workspaces** — the `# x-release-please-version` marker and the
+  `Cargo.lock` sync step are in  § Rust Workspaces
 - CHANGELOG.md is managed by release-please - never edit manually
 - Version fields in package.json/pyproject.toml are managed automatically
 - Works with `conventional-pre-commit` hook for commit validation
@@ -3191,6 +3321,7 @@ Configuration Checks:
   Release type    node                                  [PASS | WRONG TYPE]
   Changelog       feat, fix sections                    [PASS | INCOMPLETE]
   Plugin          node-workspace                        [PASS | MISSING]
+  First release   tag or initial-version set            [PASS | 1.0.0 RISK]
 
 Overall: Fully compliant | X issues found
 ```
@@ -3222,12 +3353,12 @@ jobs:
   release-please:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/create-github-app-token@v3
+      - uses: actions/create-github-app-token@v3.4.0
         id: app-token
         with:
           app-id: ${{ vars.RELEASE_PLEASE_APP_ID }}
           private-key: ${{ secrets.RELEASE_PLEASE_PRIVATE_KEY }}
-      - uses: googleapis/release-please-action@v4
+      - uses: googleapis/release-please-action@v5
         with:
           token: ${{ steps.app-token.outputs.token }}
 ```
@@ -3288,7 +3419,98 @@ jobs:
 }
 ```
 
-Version `0.0.0` is a placeholder — release-please updates it automatically.
+`0.0.0` is safe only once the repository has a release tag. Before the first
+tag, release-please ignores the manifest and falls back to its default initial
+version, so the first release PR proposes `1.0.0` even for a 0.x project with
+no breaking commits. When bootstrapping a repo with no release tag, also set
+`initial-version` on the package in `release-please-config.json` — the version
+already in the package file, or `0.1.0` for a pre-1.0 project:
+
+```json
+{
+  "packages": {
+    ".": {
+      "release-type": "node",
+      "initial-version": "0.1.0"
+    }
+  }
+}
+```
+
+After the first release the tag exists, the manifest is authoritative, and
+`initial-version` has no further effect.
+
+
+### Rust Workspaces
+
+A Cargo workspace that keeps its version in `[workspace.package]` uses
+`release-type: simple` with `Cargo.toml` as an extra file, and marks the
+version line so release-please knows which line to rewrite:
+
+```json
+{
+  "packages": {
+    ".": {
+      "release-type": "simple",
+      "initial-version": "0.1.0",
+      "extra-files": ["Cargo.toml"]
+    }
+  }
+}
+```
+
+```toml
+[workspace.package]
+version = "0.1.0" # x-release-please-version
+```
+
+release-please does not update `Cargo.lock`. If CI builds with `--locked`,
+the release PR fails until the lockfile matches the bumped version, so add a
+lock-sync job that runs on the release branch (`release-please--branches--main`
+by default): check it out, run `cargo update --workspace`, and commit the
+updated `Cargo.lock` back to that branch. Push with the release token so the
+commit triggers CI on the release PR.
+
+
+### Downstream Workflows on the Release Tag
+
+A tag or release created with `GITHUB_TOKEN` starts no other workflow. A
+release build that listens on `push: tags` or `release: published` (binary
+dist, container publish) therefore never runs if release-please used
+`GITHUB_TOKEN`. Whenever anything listens on the tag, release-please needs the
+App token (or PAT) — see [Token Configuration](#token-configuration).
+
+
+### Immutable Releases: Draft, Attach, Publish
+
+With GitHub [immutable releases](https://docs.github.com/en/code-security/concepts/supply-chain-security/immutable-releases)
+enabled, assets cannot be added to a release after it is published. An upload
+step triggered by `release: published` therefore fails, and anything after it
+in the job, such as a store or registry publish, is skipped. Follow GitHub's
+recommended order instead: create a draft, attach the assets, then publish.
+
+```json
+{
+  "packages": { ".": { "release-type": "node" } },
+  "draft": true,
+  "force-tag-creation": true
+}
+```
+
+- `force-tag-creation` is required with `draft`. GitHub creates no tag for a
+  draft until it is published, so without it release-please cannot find the
+  previous release on its next run.
+- Gate an asset job in the release-please workflow on
+  `release_created == 'true'`. It builds from `tag_name`, uploads to the draft,
+  runs any external publish, and finally publishes the draft
+  (`gh release edit <tag> --draft=false`).
+- A release that stays in draft means that job did not finish. Retry it with
+  **Re-run failed jobs**. A full re-run recomputes `release_created`, finds
+  nothing new to release, and skips the job. Any re-run replays the workflow
+  file from the original commit, so a fix merged since then does not apply.
+  Rebuild from a new `workflow_dispatch` run instead.
+- To rebuild an already-published release, a `workflow_dispatch` run with a
+  `tag` input can build it, but the assets can only go to a run artifact.
 
 
 ## Project Type Variations
@@ -3325,10 +3547,15 @@ to switch to `MY_RELEASE_PLEASE_TOKEN`.
 | FAIL | Missing required files or invalid configuration |
 
 1. **Workflow**: action version v5 (warn if older); token from a secret,
-   never hardcoded; triggers on `push` to `main`
+   never hardcoded; triggers on `push` to `main`. v5's one breaking change
+   (5.0.0, 2026-04-22) is the move to the node24 runtime: inputs and outputs
+   are unchanged, so `@v4` → `@v5` is a ref bump, but a self-hosted runner
+   must be new enough to run node24 actions.
 2. **Config**: valid release-type (`node`, `python`, `helm`, `simple`);
    changelog-sections include at least `feat` and `fix`
-3. **Manifest**: valid JSON; packages match the config
+3. **Manifest**: valid JSON; packages match the config; a `0.0.0` entry
+   with no release tag and no `initial-version` in the config FAILs (the
+   first release would be `1.0.0`)
 
 
 ## Protected Files
@@ -3351,7 +3578,7 @@ Release-please manages these automatically — never edit them manually:
 
 ## Installation Steps
 
-1. Create workflow, config, and manifest files (templates above)
+1. Create workflow, config, and manifest files ([§ Standard Templates](#standard-templates))
 2. Provide the release token — preferred: `RELEASE_PLEASE_APP_ID` variable +
    `RELEASE_PLEASE_PRIVATE_KEY` secret (gitops provisions these on
    `release_please = true` repos); legacy: `MY_RELEASE_PLEASE_TOKEN` secret
@@ -3365,6 +3592,8 @@ Release-please manages these automatically — never edit them manually:
 | Release PR not created | Conventional commit format; workflow permissions; token has write access |
 | Version not updated | Manifest is valid JSON; release-type matches project; release-please logs in Actions |
 | CI not running on release PR | Token must be a dedicated release token (App token or PAT), not `GITHUB_TOKEN` |
+| Asset upload fails on a published release; later publish steps skipped | Immutable releases are on — use `draft: true` + `force-tag-creation` (see [§ Immutable Releases](#immutable-releases-draft-attach-publish)) |
+| Release stuck in draft | The asset/publish job did not finish — **Re-run failed jobs**, not a full re-run |
 
 ---
 
@@ -3576,6 +3805,32 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
 
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
 ```
+
+
+### Trivy Gate Fails on a CVE Debian Already Fixed
+
+A Debian-based tag (`python:3.x-slim`) can lag a package fix Debian has
+already published, and a Trivy gate with `--ignore-unfixed` still fails on it.
+Upgrade packages in the runtime stage, before `USER` (it needs root):
+
+```dockerfile
+RUN apt-get update && apt-get upgrade -y --no-install-recommends && rm -rf /var/lib/apt/lists/*
+```
+
+Verify the rebuilt image with the gate's own scope:
+
+```bash
+trivy image --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 <image>
+```
+
+A bare `trivy image` also runs the secret scanner, which can flag strings
+inside installed packages (docstrings in the `anthropic` SDK read as GCP
+service-account keys). Those findings are outside a vuln-only gate.
+
+> Evidence (2026-11-10, telegram-ingest v0.1.1): `python:3.12-slim-trixie`
+> still had `zlib1g 1:1.3.dfsg+really1.3.1-1+b1` (CVE-2026-76844,
+> CVE-2026-85091); Debian's fix is `+deb13u1`. The upgrade step cleared the
+> gate (telegram-ingest#29).
 
 
 ## Notes
@@ -4284,7 +4539,7 @@ Sentry.init({
 
 ```yaml
 - name: Create Sentry Release
-  uses: getsentry/action-release@v3
+  uses: getsentry/action-release@v3.9.1
   env:
     SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
     SENTRY_ORG: your-org
