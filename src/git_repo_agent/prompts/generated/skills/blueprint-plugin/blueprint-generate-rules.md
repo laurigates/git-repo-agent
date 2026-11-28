@@ -1,229 +1,240 @@
 Generate project-specific rules from Product Requirements Documents.
-## Steps
+## Execution
+
+Execute this rule-generation workflow:
 
 **Prerequisites**:
 - `docs/prds/` directory exists
 - At least one PRD file in `docs/prds/`
 
-0. **Resolve the output path**:
 
-   Read `structure.generated_rules_path` from `docs/blueprint/manifest.json` (default `.claude/rules/`):
+### Step 0: Resolve the output path
 
-   ```bash
-   RULES_DIR=$(jq -r '.structure.generated_rules_path // ".claude/rules/"' docs/blueprint/manifest.json)
-   mkdir -p "$RULES_DIR"
-   ```
+Read `structure.generated_rules_path` from `docs/blueprint/manifest.json` (default `.claude/rules/`):
 
-   Use `$RULES_DIR` for all subsequent reads/writes. This isolates blueprint-managed rules from any hand-written files in the parent `.claude/rules/` directory (issue #1043).
+```bash
+RULES_DIR=$(jq -r '.structure.generated_rules_path // ".claude/rules/"' docs/blueprint/manifest.json)
+mkdir -p "$RULES_DIR"
+```
 
-1. **Find and read all PRDs**:
-   - Use Glob to find all `.md` files in `docs/prds/`
-   - Read each PRD file
-   - If no PRDs found, report error and suggest writing PRDs first
+Use `$RULES_DIR` for all subsequent reads/writes. This isolates blueprint-managed rules from any hand-written files in the parent `.claude/rules/` directory (issue #1043).
 
-2. **Check for existing generated rules**:
-   ```bash
-   ls "$RULES_DIR" 2>/dev/null
-   ```
-   - Scope conflict checks to files under `$RULES_DIR` only — never to the parent `.claude/rules/`. Hand-written files outside `$RULES_DIR` are invisible to this check.
-   - If rules exist, check manifest for content hashes
-   - Compare current content hash vs stored hash
-   - If modified, offer options: overwrite, skip, or backup
 
-3. **Analyze PRDs and extract** (aggregated from all PRDs):
+### Step 1: Find and read all PRDs
 
-   **Architecture Patterns**:
-   - Project structure and organization
-   - Architectural style (MVC, layered, hexagonal, etc.)
-   - Design patterns
-   - Dependency injection approach
-   - Error handling strategy
-   - Code organization conventions
-   - Integration patterns
+- Use Glob to find all `.md` files in `docs/prds/`
+- Read each PRD file
+- If no PRDs found, report error and suggest writing PRDs first
 
-   **Testing Strategies**:
-   - TDD workflow requirements
-   - Test types (unit, integration, e2e)
-   - Mocking patterns
-   - Coverage requirements
-   - Test structure and organization
-   - Test commands
 
-   **Implementation Guides**:
-   - How to implement APIs/endpoints
-   - How to implement UI components (if applicable)
-   - Database operation patterns
-   - External service integration patterns
-   - Background job patterns (if applicable)
+### Step 2: Check for existing generated rules
 
-   **Quality Standards**:
-   - Code review checklist
-   - Performance baselines
-   - Security requirements (OWASP, validation, auth)
-   - Code style and formatting
-   - Documentation requirements
-   - Dependency management
+```bash
+ls "$RULES_DIR" 2>/dev/null
+```
+- Scope conflict checks to files under `$RULES_DIR` only — never to the parent `.claude/rules/`. Hand-written files outside `$RULES_DIR` are invisible to this check.
+- If rules exist, check manifest for content hashes
+- Compare current content hash vs stored hash
+- If modified, offer options: overwrite, skip, or backup
 
-4. **Generate four aggregated domain rules**:
 
-   Create in `$RULES_DIR` (the configured `structure.generated_rules_path`):
+### Step 3: Analyze PRDs and extract (aggregated from all PRDs)
 
-   **`architecture-patterns.md`**:
-   - Aggregated patterns from all PRDs
-   - Fill in project-specific patterns extracted from PRDs
-   - Include code examples where possible
-   - Reference specific files/directories
+**Architecture Patterns**:
+- Project structure and organization
+- Architectural style (MVC, layered, hexagonal, etc.)
+- Design patterns
+- Dependency injection approach
+- Error handling strategy
+- Code organization conventions
+- Integration patterns
 
-   **`testing-strategies.md`**:
-   - Aggregated testing requirements from all PRDs
-   - Fill in TDD requirements from PRDs
-   - Include coverage requirements
-   - Include test commands for the project
-   - Add `paths` frontmatter if tests live in specific directories:
-     ```yaml
-     ---
-     paths:
-       - "tests/**/*"
-       - "**/*.{test,spec}.*"
-     ---
-     ```
+**Testing Strategies**:
+- TDD workflow requirements
+- Test types (unit, integration, e2e)
+- Mocking patterns
+- Coverage requirements
+- Test structure and organization
+- Test commands
 
-   **`implementation-guides.md`**:
-   - Aggregated implementation patterns from all PRDs
-   - Fill in step-by-step patterns for feature types
-   - Include code examples
-   - Scope to source paths if applicable:
-     ```yaml
-     ---
-     paths:
-       - "src/**/*"
-       - "lib/**/*"
-     ---
-     ```
+**Implementation Guides**:
+- How to implement APIs/endpoints
+- How to implement UI components (if applicable)
+- Database operation patterns
+- External service integration patterns
+- Background job patterns (if applicable)
 
-   **`quality-standards.md`**:
-   - Aggregated quality requirements from all PRDs
-   - Fill in performance baselines from PRDs
-   - Fill in security requirements from PRDs
-   - Create project-specific checklist
+**Quality Standards**:
+- Code review checklist
+- Performance baselines
+- Security requirements (OWASP, validation, auth)
+- Code style and formatting
+- Documentation requirements
+- Dependency management
 
-   **Path-scoping guidance**: Add `paths` frontmatter when a rule only applies to specific file types or directories. This reduces context noise — Claude only loads the rule when working on matching files. Use brace expansion for concise patterns: `*.{ts,tsx}`, `src/{api,routes}/**/*`.
 
-5. **Update manifest with generation tracking**:
+### Step 4: Generate four aggregated domain rules
 
-   Register the rules through the shared helper rather than hand-writing the
-   jq — `/blueprint:init` Step 8a calls the same script, so the two producers of
-   `$RULES_DIR` cannot drift apart on the record shape or on how the hash is
-   computed (issue #2331):
+Create in `$RULES_DIR` (the configured `structure.generated_rules_path`):
 
-   ```bash
-   bash "${CLAUDE_SKILL_DIR}/../../scripts/register-generated-rules.sh" \
-     --source "docs/prds/*" \
-     --source-hash "$PRD_AGGREGATE_SHA256" \
-     --plugin-version "3.4.0" \
-     architecture-patterns.md testing-strategies.md implementation-guides.md quality-standards.md
-   ```
+**`architecture-patterns.md`**:
+- Aggregated patterns from all PRDs
+- Fill in project-specific patterns extracted from PRDs
+- Include code examples where possible
+- Reference specific files/directories
 
-   `--source-hash` is the bare hex sha256 over the aggregated PRD content; it is
-   what Step 2 (and `/blueprint:sync` Step 2d) compares against to decide
-   whether a rule has gone stale.
+**`testing-strategies.md`**:
+- Aggregated testing requirements from all PRDs
+- Fill in TDD requirements from PRDs
+- Include coverage requirements
+- Include test commands for the project
+- Add `paths` frontmatter if tests live in specific directories:
+  ```yaml
+  ---
+  paths:
+    - "tests/**/*"
+    - "**/*.{test,spec}.*"
+  ---
+  ```
 
-   **Key form** — keys are filenames **relative** to `$RULES_DIR`, **including
-   the `.md` extension**, so the registry stays stable when
-   `generated_rules_path` changes (the path itself lives in
-   `structure.generated_rules_path`, exactly once). Consumers resolve a rule as
-   `"$RULES_DIR/$key"` and must **not** append `.md`.
+**`implementation-guides.md`**:
+- Aggregated implementation patterns from all PRDs
+- Fill in step-by-step patterns for feature types
+- Include code examples
+- Scope to source paths if applicable:
+  ```yaml
+  ---
+  paths:
+    - "src/**/*"
+    - "lib/**/*"
+  ---
+  ```
 
-   The resulting `generated.rules` **object map** (per
-   `blueprint-plugin/schemas/manifest.schema.json`):
+**`quality-standards.md`**:
+- Aggregated quality requirements from all PRDs
+- Fill in performance baselines from PRDs
+- Fill in security requirements from PRDs
+- Create project-specific checklist
 
-   ```json
-   {
-     "generated": {
-       "rules": {
-         "architecture-patterns.md": {
-           "source": "docs/prds/*",
-           "source_hash": "e3b0c44298fc1c149afbf4c8996fb924...",
-           "generated_at": "[ISO timestamp]",
-           "plugin_version": "3.4.0",
-           "content_hash": "a3f5b1c9d2e4867011223344556677889...",
-           "status": "current"
-         },
-         "testing-strategies.md": { ... },
-         "implementation-guides.md": { ... },
-         "quality-standards.md": { ... }
-       }
-     }
-   }
-   ```
+**Path-scoping guidance**: Add `paths` frontmatter when a rule only applies to specific file types or directories. This reduces context noise — Claude only loads the rule when working on matching files. Use brace expansion for concise patterns: `*.{ts,tsx}`, `src/{api,routes}/**/*`.
 
-   **Hash form** — `content_hash` and `source_hash` are **bare lowercase hex**
-   sha256 digests with no `sha256:` prefix. Both readers (`/blueprint:sync`
-   Step 2b and `blueprint-plugin/hooks/blueprint-drift-probe.sh`) compare the
-   raw output of `sha256sum` / `shasum -a 256` against these fields, so a
-   prefixed value can never match and every rule would read as perpetually
-   modified.
 
-6. **Update task registry**:
+### Step 5: Update manifest with generation tracking
 
-   Update the task registry entry in `docs/blueprint/manifest.json`:
+Register the rules through the shared helper rather than hand-writing the
+jq — `/blueprint:init` Step 8a calls the same script, so the two producers of
+`$RULES_DIR` cannot drift apart on the record shape or on how the hash is
+computed (issue #2331):
 
-   ```bash
-   jq --arg now "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-     --argjson processed "${PRDS_READ:-0}" \
-     --argjson created "${RULES_GENERATED:-0}" \
-     '.task_registry["generate-rules"].last_completed_at = $now |
-      .task_registry["generate-rules"].last_result = "success" |
-      .task_registry["generate-rules"].context.source_prd_hashes = ($source_prd_hashes // {}) |
-      .task_registry["generate-rules"].stats.runs_total = ((.task_registry["generate-rules"].stats.runs_total // 0) + 1) |
-      .task_registry["generate-rules"].stats.items_processed = $processed |
-      .task_registry["generate-rules"].stats.items_created = $created' \
-     docs/blueprint/manifest.json > tmp.json && mv tmp.json docs/blueprint/manifest.json
-   ```
+```bash
+bash "${CLAUDE_SKILL_DIR}/../../scripts/register-generated-rules.sh" \
+  --source "docs/prds/*" \
+  --source-hash "$PRD_AGGREGATE_SHA256" \
+  architecture-patterns.md testing-strategies.md implementation-guides.md quality-standards.md
+```
 
-   For `source_prd_hashes`, compute `sha256sum` of each PRD file and pass as a JSON object via `--argjson`.
+`--source-hash` is the bare hex sha256 over the aggregated PRD content; it is
+what Step 2 (and `/blueprint:sync` Step 2d) compares against to decide
+whether a rule has gone stale. The script records the plugin version from its
+own `plugin.json`, so the call carries no `--plugin-version`.
 
-7. **Report**:
-   ```
-   Rules generated from PRDs!
+**Key form** — keys are filenames **relative** to `$RULES_DIR`, **including
+the `.md` extension**, so the registry stays stable when
+`generated_rules_path` changes (the path itself lives in
+`structure.generated_rules_path`, exactly once). Consumers resolve a rule as
+`"$RULES_DIR/$key"` and must **not** append `.md`.
 
-   Created in $RULES_DIR (configured via structure.generated_rules_path):
-   - architecture-patterns.md
-   - testing-strategies.md
-   - implementation-guides.md
-   - quality-standards.md
+The resulting `generated.rules` **object map** (per
+`blueprint-plugin/schemas/manifest.schema.json`):
 
-   PRDs analyzed:
-   - docs/prds/[List PRD files]
+```json
+{
+  "generated": {
+    "rules": {
+      "architecture-patterns.md": {
+        "source": "docs/prds/*",
+        "source_hash": "e3b0c44298fc1c149afbf4c8996fb924...",
+        "generated_at": "[ISO timestamp]",
+        "plugin_version": "[plugin.json version]",
+        "content_hash": "a3f5b1c9d2e4867011223344556677889...",
+        "status": "current"
+      },
+      "testing-strategies.md": { ... },
+      "implementation-guides.md": { ... },
+      "quality-standards.md": { ... }
+    }
+  }
+}
+```
 
-   Key patterns extracted:
-   - Architecture: [Brief summary]
-   - Testing: [Brief summary]
-   - Implementation: [Brief summary]
-   - Quality: [Brief summary]
+**Hash form** — `content_hash` and `source_hash` are **bare lowercase hex**
+sha256 digests with no `sha256:` prefix. Both readers (`/blueprint:sync`
+Step 2b and `blueprint-plugin/hooks/blueprint-drift-probe.sh`) compare the
+raw output of `sha256sum` / `shasum -a 256` against these fields, so a
+prefixed value can never match and every rule would read as perpetually
+modified.
 
-   Rules are immediately available - Claude auto-discovers them based on context!
-   ```
 
-8. **Prompt for next action** (use report to orchestrator):
-   ```
-   question: "Rules generated. What would you like to do next?"
-   options:
-     - label: "Generate workflow commands (Recommended)"
-       description: "Create /project:continue and /project:test-loop commands"
-     - label: "Update CLAUDE.md"
-       description: "Regenerate project overview document with new rules"
-     - label: "Review generated rules"
-       description: "I'll examine and refine the rules manually"
-     - label: "I'm done for now"
-       description: "Exit - rules are already available"
-   ```
+### Step 6: Update task registry
 
-   **Based on selection:**
-   - "Generate workflow commands" -> Run `/blueprint:generate-commands`
-   - "Update CLAUDE.md" -> Run `/blueprint:claude-md`
-   - "Review generated rules" -> Show rule file locations and exit
-   - "I'm done for now" -> Exit
+Update the task registry entry in `docs/blueprint/manifest.json`:
+
+```bash
+jq --arg now "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  --argjson processed "${PRDS_READ:-0}" \
+  --argjson created "${RULES_GENERATED:-0}" \
+  '.task_registry["generate-rules"].last_completed_at = $now |
+   .task_registry["generate-rules"].last_result = "success" |
+   .task_registry["generate-rules"].context.source_prd_hashes = ($source_prd_hashes // {}) |
+   .task_registry["generate-rules"].stats.items_processed = $processed |
+   .task_registry["generate-rules"].stats.items_created = $created' \
+  docs/blueprint/manifest.json > tmp.json && mv tmp.json docs/blueprint/manifest.json
+```
+
+For `source_prd_hashes`, compute `sha256sum` of each PRD file and pass as a JSON object via `--argjson`.
+
+
+### Step 7: Report
+
+```
+Rules generated from PRDs!
+
+Created in $RULES_DIR (configured via structure.generated_rules_path):
+- architecture-patterns.md
+- testing-strategies.md
+- implementation-guides.md
+- quality-standards.md
+
+PRDs analyzed:
+- docs/prds/[List PRD files]
+
+Key patterns extracted:
+- Architecture: [Brief summary]
+- Testing: [Brief summary]
+- Implementation: [Brief summary]
+- Quality: [Brief summary]
+
+Rules are immediately available - Claude auto-discovers them based on context!
+```
+
+
+### Step 8: Prompt for next action (use report to orchestrator)
+
+```
+question: "Rules generated. What would you like to do next?"
+options:
+  - label: "Update CLAUDE.md"
+    description: "Regenerate project overview document with new rules"
+  - label: "Review generated rules"
+    description: "I'll examine and refine the rules manually"
+  - label: "I'm done for now"
+    description: "Exit - rules are already available"
+```
+
+**Based on selection:**
+- "Update CLAUDE.md" -> Run `/blueprint:claude-md`
+- "Review generated rules" -> Show rule file locations and exit
+- "I'm done for now" -> Exit
 
 **Important**:
 - Rules should be markdown files with clear headings

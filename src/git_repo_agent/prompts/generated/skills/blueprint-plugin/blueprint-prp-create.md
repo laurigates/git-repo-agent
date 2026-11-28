@@ -52,16 +52,17 @@ Use WebSearch/WebFetch as needed. Create or update curated rule entries if neede
 
 ### Step 4: Generate PRP document ID and structure
 
-Generate next PRP ID from manifest:
-- Extract `id_registry.last_prp` from manifest.json
-- Next ID = last_prp + 1 (format: `PRP-NNN`)
+Take the next PRP ID from the "Next PRP ID" line in [Context](#context), or run
+`bash "${CLAUDE_SKILL_DIR}/../../scripts/blueprint-next-id.sh" --kind PRP`. It is
+max(`id_registry.last_prp`, highest PRP id on disk) + 1 in `PRP-NNN` form, so a
+PRP pulled in since the last registry update is not assigned again.
 
 Create `docs/prps/[feature-name].md` with frontmatter and sections (see [REFERENCE.md](REFERENCE.md#prp-structure)).
 
 
 ### Step 5: Draft PRP content with research findings
 
-Fill all required sections (see [REFERENCE.md](REFERENCE.md#prp-sections)):
+Fill all required sections (see [REFERENCE.md](REFERENCE.md#prp-structure)):
 
 1. **Goal & Why**: One-sentence goal, business justification, target users, priority
 2. **Success Criteria**: Specific, testable acceptance criteria with metrics

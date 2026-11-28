@@ -50,13 +50,15 @@ If not, initialize it:
 ### Step 2: Run the read-only ID audit
 
 Run the helper. It owns the read-only scan: frontmatter `id:` extraction across
-PRDs/ADRs/PRPs/work-orders, deriving the expected `ADR-NNNN` / `WO-NNN` from each
+PRDs/ADRs/PRPs/work-orders, deriving the expected ADR / `WO-NNN` id from each
 filename, flagging `NEEDS_ID` (no id) and `id_mismatch` (frontmatter id disagrees
-with the filename-derived expectation), and building the reverse `github_issues`
-index from the manifest registry:
+with the filename-derived expectation), checking ids against the manifest
+`id_registry`, and building the reverse `github_issues` index from it. ADRs come
+from `docs/adrs/`, else `docs/adr/`, named `NNNN-title.md` or `ADR-NNN-title.md`
+(else the frontmatter `id:` alone):
 
 ```bash
-bash "${CLAUDE_SKILL_DIR}/scripts/blueprint-sync-ids.sh" --home-dir "$HOME" --project-dir "$(pwd)"
+bash "${CLAUDE_SKILL_DIR}/scripts/blueprint-sync-ids.sh" --home-dir "$HOME"
 ```
 
 Parse `STATUS=` and `ISSUES:` from the output:
@@ -67,9 +69,40 @@ Parse `STATUS=` and `ISSUES:` from the output:
 - `ADR_MISMATCH` / `WO_MISMATCH` and the `id_mismatch` issues (`HAS=` vs
   `EXPECTED=`) are documents whose frontmatter id disagrees with their filename
   — reconcile these in Step 7, never silently. `STATUS=ERROR` indicates at least
-  one mismatch.
+  one mismatch, duplicate, or registry conflict.
+- `ADR_DIR` is the ADR directory scanned (`none` if absent);
+  `ADR_FRONTMATTER_ONLY` counts ADRs numbered only in frontmatter.
+- `DUPLICATE_IDS` / `duplicate_id` (ERROR, `KIND=` `ID=` `DOCS=`): two documents
+  of one kind share a frontmatter id. Renumber one before assigning anything.
+- `REGISTRY_PRESENT` is `true` only when the manifest has `id_registry` with a
+  `documents` map; when `false`, every registry check is skipped (counts `0`).
+  Documents under `docs/{prds,adrs,prps,trps}/` and `docs/blueprint/work-orders/`
+  are compared by the id-registry engine
+  (`blueprint-autorun.sh --registry-reconcile --check`, which writes nothing);
+  the rows are what the engine would change on its next reconcile:
+  - `REGISTRY_ID_ABSENT` / `registry_id_absent` (ERROR): the entry's path exists
+    but its frontmatter does not carry the id (`HAS=` is what it carries) — a
+    junk entry or the old key of a re-id'd document. The engine prunes it.
+  - `REGISTRY_UNREGISTERED` / `unregistered` (WARN): the id is not in
+    `documents`. Add it in Step 7.
+  - `REGISTRY_ID_PATH_MISMATCH` / `id_path_mismatch` (ERROR): the id is
+    registered under another path (`REGISTRY_PATH=`); outside the engine's scan
+    set, also the path registered under another id (`REGISTRY=`). A swapped
+    pair is two rows.
+  - `REGISTRY_FIELD_DRIFT` / `registry_field_drift` (INFO): derived fields
+    (`FIELDS=`) differ from frontmatter; the engine refreshes them.
+  - `REGISTRY_PATH_MISSING` / `registry_path_missing` (ERROR): a `documents`
+    `path` not on disk. Step 7a removes the entry once git confirms the deletion.
+  - `REGISTRY_PATH_IGNORED` / `registry_path_ignored` (INFO): the missing path
+    is git-ignored (work orders) or outside a sparse checkout. Keep the entry.
+  - `ADR_NUMBER_RESERVED` / `adr_number_reserved` (INFO): a deleted ADR's entry.
+    Keep it: it is the only thing reserving the number
+    (`/blueprint:adr-validate`'s registry check; there is no ADR counter).
+  - `COUNTER_STALE` / `counter_stale` (WARN): a `last_*` counter is below the
+    highest id of its kind on disk (`MAX_ON_DISK=`). Raise it before Step 7.
 - `GH_ISSUE_MAPPINGS` and `MANIFEST_PRESENT` summarise the reverse-index build
   (Step 9 detail below).
+- On WARN/ERROR, `REASON=` names the first finding as `<type>: <detail>`.
 
 The audit is read-only; it makes no edits. Surface its counts as the Step 6
 report and proceed to the mutating steps.
@@ -79,30 +112,75 @@ report and proceed to the mutating steps.
 
 For each document needing an ID:
 
+PRD and PRP ids come from the shared helper, which prints max(`id_registry.last_<kind>`,
+highest id of that kind on disk) + 1. The counter alone can repeat an id that a
+pulled or merged document already carries (#3554). Call the helper once per
+document, after the previous document's `id:` is written, so each call sees it:
+
+```bash
+bash "${CLAUDE_SKILL_DIR}/../../scripts/blueprint-next-id.sh" --kind PRD
+bash "${CLAUDE_SKILL_DIR}/../../scripts/blueprint-next-id.sh" --kind PRP
+```
+
 **PRDs**:
-1. Get next PRD number: `jq '.id_registry.last_prd' manifest.json` + 1
-2. Generate ID: `PRD-NNN` (zero-padded)
-3. Insert into frontmatter after first `---`:
+1. Get the next ID from `blueprint-next-id.sh --kind PRD` (prints `PRD-NNN`)
+2. Insert into frontmatter after first `---`:
    ```yaml
    id: PRD-001
    ```
-4. Update manifest: increment `last_prd`, add to `documents`
+3. Update manifest: set `last_prd` to the assigned number, add to `documents`
 
 **ADRs**:
-1. Derive ID from filename: `0003-title.md` → `ADR-0003`
+1. Derive ID from filename: `0003-title.md` → `ADR-0003`, `ADR-003-title.md` → `ADR-003`
 2. Insert into frontmatter
 3. Add to manifest `documents`
 
 **PRPs**:
-1. Get next PRP number: `jq '.id_registry.last_prp' manifest.json` + 1
-2. Generate ID: `PRP-NNN`
-3. Insert into frontmatter
-4. Update manifest: increment `last_prp`, add to `documents`
+1. Get the next ID from `blueprint-next-id.sh --kind PRP` (prints `PRP-NNN`)
+2. Insert into frontmatter
+3. Update manifest: set `last_prp` to the assigned number, add to `documents`
 
 **Work-Orders**:
 1. Derive ID from filename: `003-task.md` → `WO-003`
 2. Insert into frontmatter
 3. Add to manifest `documents`
+
+
+### Step 7a: Remove entries of deleted documents (unless `--dry-run`)
+
+The engine never removes an entry whose path is missing, because the path may
+exist in another clone. For each `registry_path_missing` row (`ID=`, `PATH=`),
+ask with `report to orchestrator` whether to remove the entry, listing every row in
+one question. Run this for each confirmed row, with `ID`, `REG_PATH` and
+`MANIFEST` set:
+
+```bash
+
+# registry-removal:begin
+
+# Removes the entry only when git records REG_PATH as deleted; never an ADR
+
+# entry (it reserves the number); never touches last_* counters.
+if [ -n "$(git log -1 --diff-filter=D --format=%h -- "$REG_PATH" 2>/dev/null)" ]; then
+  jq --arg id "$ID" '
+    if ($id | ascii_upcase | startswith("ADR-")) then
+      error("ADR entries reserve their number; keep \($id)")
+    else
+      del(.id_registry.documents[$id])
+      | .id_registry.github_issues |= ((. // {})
+          | map_values(if type == "array" then map(select(. != $id)) else . end)
+          | with_entries(select(.value != [])))
+    end' "$MANIFEST" > "$MANIFEST.removal" \
+    && mv "$MANIFEST.removal" "$MANIFEST" \
+    || { rm -f "$MANIFEST.removal"; echo "KEPT: $ID"; }
+else
+  echo "KEPT: $ID — git records no deletion of $REG_PATH"
+fi
+
+# registry-removal:end
+```
+
+Report each `KEPT:` line in Step 11.
 
 
 ### Step 8: Extract Titles and Links
@@ -179,25 +257,13 @@ gh issue create \
 
 Update document frontmatter and manifest with new issue number.
 
-
-### Step 11: Update task registry
-
-Update the task registry entry in `docs/blueprint/manifest.json`:
-
-```bash
-jq --arg now "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-  --argjson processed "${DOCS_CHECKED:-0}" \
-  --argjson created "${IDS_ASSIGNED:-0}" \
-  '.task_registry["sync-ids"].last_completed_at = $now |
-   .task_registry["sync-ids"].last_result = "success" |
-   .task_registry["sync-ids"].stats.runs_total = ((.task_registry["sync-ids"].stats.runs_total // 0) + 1) |
-   .task_registry["sync-ids"].stats.items_processed = $processed |
-   .task_registry["sync-ids"].stats.items_created = $created' \
-  docs/blueprint/manifest.json > tmp.json && mv tmp.json docs/blueprint/manifest.json
-```
+`sync-ids` is a deterministic task and keeps no run state in the tracked
+manifest (ADR-0027, #3548): do not write `task_registry["sync-ids"]`
+`last_completed_at`, `last_result` or `stats`. The only manifest changes are
+the `id_registry` edits made in Steps 1–10.
 
 
-### Step 12: Final Report
+### Step 11: Final Report
 
 ```
 ID Sync Complete
